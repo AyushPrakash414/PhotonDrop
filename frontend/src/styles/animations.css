@@ -1,0 +1,59 @@
+@keyframes pulseRings {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+
+@keyframes signalGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(242, 106, 69, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(242, 106, 69, 0.8);
+  }
+}
+
+@keyframes spinSlow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-pulse-rings {
+  animation: pulseRings 2.5s infinite ease-in-out;
+}
+
+.animate-signal-glow {
+  animation: signalGlow 2s infinite ease-in-out;
+}
+
+.animate-spin-slow {
+  animation: spinSlow 12s linear infinite;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}

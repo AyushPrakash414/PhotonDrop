@@ -1,0 +1,72 @@
+.sender-control-container {
+  width: 100%;
+}
+
+.dropzone-card {
+  border: 2px dashed var(--border-color);
+  background-color: var(--bg-card);
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.dropzone-card:hover {
+  border-color: var(--accent-primary);
+  background-color: var(--accent-soft);
+}
+
+.dropzone-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background-color: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropzone-card h3 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.dropzone-card p {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.selected-file-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.action-row {
+  display: flex;
+  justify-content: center;
+}
+
+.start-btn {
+  background-color: var(--success);
+  box-shadow: 0 4px 14px rgba(53, 166, 111, 0.3);
+}
+
+.start-btn:hover {
+  background-color: #2e9362;
+}
+
+.stop-btn {
+  background-color: var(--error);
+  box-shadow: 0 4px 14px rgba(217, 83, 79, 0.3);
+}
+
+.stop-btn:hover {
+  background-color: #c94743;
+}

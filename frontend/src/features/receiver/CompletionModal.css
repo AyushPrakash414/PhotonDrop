@@ -1,0 +1,104 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.completion-card {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.completion-card.error-card {
+  border-color: var(--error);
+}
+
+.completion-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--success-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.error-card .completion-icon {
+  background-color: var(--error-soft);
+}
+
+.completion-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.completion-subtitle {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.reconstructed-file-box {
+  width: 100%;
+  background-color: var(--bg-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.file-info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rec-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rec-size {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.hash-verify-row {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.hash-code {
+  color: var(--text-secondary);
+}
+
+.completion-actions {
+  margin-top: 8px;
+}
+
+.error-retry-btn {
+  background-color: var(--error);
+}

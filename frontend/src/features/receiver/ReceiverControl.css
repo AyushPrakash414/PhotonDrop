@@ -1,0 +1,18 @@
+.receiver-control-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: center;
+}
+
+.start-camera-btn {
+  background-color: var(--accent-primary);
+}
+
+.stop-camera-btn {
+  background-color: var(--error);
+}
+
+.reset-btn {
+  padding: 12px 20px;
+}

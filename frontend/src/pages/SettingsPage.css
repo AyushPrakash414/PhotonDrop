@@ -1,0 +1,99 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-section:last-of-type {
+  border-bottom: none;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title h3 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-label span {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.setting-label p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.setting-input,
+.setting-input-text {
+  background-color: var(--bg-muted);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.setting-input-text {
+  min-width: 240px;
+}
+
+.theme-options-row {
+  display: flex;
+  gap: 16px;
+}
+
+.theme-card-btn {
+  flex: 1;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-muted);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.theme-card-btn.selected {
+  border-color: var(--accent-primary);
+  background-color: var(--accent-soft);
+  color: var(--accent-primary);
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+}

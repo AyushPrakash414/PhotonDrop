@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "photondrop"
+version = "0.1.0"
+description = "Offline optical file transfer through screen-to-camera communication using fountain coding"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Ayush Prakash"},
+]
+
+dependencies = [
+    "PySide6>=6.5",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "qrcode[pil]>=7.4",
+    "pyzbar>=0.1.9",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+
+[project.scripts]
+photondrop-sender = "sender.main:main"
+photondrop-receiver = "receiver.main:main"
+
+[tool.setuptools.packages.find]
+include = ["shared*", "fountain*", "visual*", "sender*", "receiver*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "fountain/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

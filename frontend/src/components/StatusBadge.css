@@ -1,0 +1,36 @@
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: all 0.2s ease;
+}
+
+.status-idle {
+  background-color: var(--bg-muted);
+  color: var(--text-secondary);
+}
+
+.status-active {
+  background-color: var(--accent-soft);
+  color: var(--accent-primary);
+}
+
+.status-warning {
+  background-color: var(--warning-soft);
+  color: var(--warning);
+}
+
+.status-success {
+  background-color: var(--success-soft);
+  color: var(--success);
+}
+
+.status-error {
+  background-color: var(--error-soft);
+  color: var(--error);
+}

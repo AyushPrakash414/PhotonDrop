@@ -51,17 +51,20 @@ app.include_router(receiver_router)
 app.include_router(status_router)
 app.include_router(ws_router)
 
-# Serve built frontend if it exists
+@app.get("/health", status_code=200)
+@app.head("/health", status_code=200)
+@app.get("/api/health", status_code=200)
+@app.head("/api/health", status_code=200)
+@app.get("/", status_code=200)
+@app.head("/", status_code=200)
+async def health_check():
+    return {"status": "online", "system": "PhotonDrop Optical Core"}
+
+
+# Serve built frontend if it exists (mounted AFTER explicit API routes)
 frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if frontend_dist.exists():
     app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
-
-
-@app.get("/")
-@app.get("/health")
-@app.get("/api/health")
-async def health_check():
-    return {"status": "online", "system": "PhotonDrop Optical Core"}
 
 
 def main():

@@ -91,12 +91,17 @@ class Receiver:
         if self._on_preview_frame:
             self._on_preview_frame(frame)
 
-        # Preprocess
-        processed = preprocess_frame(frame, max_dim=800)
+        # Track capture metrics on every incoming frame
+        self._decode_count += 1
+        elapsed = time.monotonic() - self._decode_start
+        if elapsed > 0:
+            self.processor.stats.capture_fps = self._decode_count / elapsed
+            self.processor.stats.elapsed_time = elapsed
 
-        # Attempt visual decode
-        raw_bytes = decode_frame_to_bytes(processed, self.transport)
+        # Multi-pass visual decode (tries raw frame, grayscale, CLAHE, and thresholding)
+        raw_bytes = decode_frame_to_bytes(frame, self.transport)
         if raw_bytes is None:
+            self.processor.stats.invalid_frames += 1
             return
 
         # Validate and filter
@@ -112,12 +117,9 @@ class Receiver:
         if self.reconstruction.session.session_id and self.processor._current_session is None:
             self.processor.set_session(self.reconstruction.session.session_id)
 
-        # Update decode FPS
-        self._decode_count += 1
-        elapsed = time.monotonic() - self._decode_start
+        # Update decode FPS & goodput
         if elapsed > 0:
             self.processor.stats.decode_fps = self._decode_count / elapsed
-            self.processor.stats.elapsed_time = elapsed
             self.processor.stats.goodput = (
                 self.processor.stats.payload_bytes / elapsed if elapsed > 0 else 0
             )

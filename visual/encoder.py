@@ -92,25 +92,29 @@ class QRTransport(VisualTransport):
     def decode(self, frame: np.ndarray) -> Optional[bytes]:
         """Decode a QR code from a camera frame.
 
-        Tries OpenCV's QRCodeDetector first, then falls back to pyzbar.
+        Tries pyzbar first for raw binary bytes preservation, then falls back to OpenCV.
         Returns None if no QR code is detected.
         """
-        result = self._decode_opencv(frame)
+        result = self._decode_pyzbar(frame)
         if result is not None:
             return result
-        return self._decode_pyzbar(frame)
+        return self._decode_opencv(frame)
 
     def _decode_opencv(self, frame: np.ndarray) -> Optional[bytes]:
         """Attempt QR decode using OpenCV's built-in detector."""
         try:
             import cv2
             detector = cv2.QRCodeDetector()
+            # Try single decode first
+            data_str, points, _ = detector.detectAndDecode(frame)
+            if data_str:
+                return data_str.encode("latin-1")
+
+            # Fallback to multi decode
             retval, decoded_info, points, straight_qrcode = detector.detectAndDecodeMulti(frame)
             if retval and decoded_info:
                 for info in decoded_info:
                     if info:
-                        # OpenCV returns string; encode back to bytes
-                        # For binary data, we use detectAndDecode which returns bytes
                         return info.encode("latin-1") if isinstance(info, str) else info
         except Exception:
             pass

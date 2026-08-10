@@ -44,6 +44,8 @@ async def process_browser_frame(req: ProcessFrameRequest) -> Dict[str, Any]:
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
         if frame is not None:
+            from backend.api.websocket import _on_receiver_preview
+            _on_receiver_preview(frame)
             global_receiver.process_frame(frame)
             return {"status": "processed", "state": global_receiver.state.name}
         else:

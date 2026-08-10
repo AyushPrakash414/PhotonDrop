@@ -79,7 +79,8 @@ async def websocket_endpoint(websocket: WebSocket):
             # Gather Receiver State
             receiver_frame_b64 = None
             receiver_payload = None
-            if global_receiver.camera.is_running:
+            is_receiver_active = global_receiver.camera.is_running or global_receiver.state.name != "IDLE"
+            if is_receiver_active:
                 if _latest_receiver_frame is not None:
                     receiver_frame_b64 = _frame_to_base64_jpeg(_latest_receiver_frame, quality=70)
 
@@ -109,7 +110,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "stats": sender_stats,
                 },
                 "receiver": {
-                    "is_active": global_receiver.camera.is_running,
+                    "is_active": is_receiver_active,
                     "frame_b64": receiver_frame_b64,
                     "data": receiver_payload,
                 },

@@ -189,6 +189,18 @@ PhotonDrop is configured for zero-friction cloud deployment:
    - `VITE_WS_BASE_URL` = `wss://photondrop-backend.onrender.com`
 4. Click **Deploy**. Vercel uses [`frontend/vercel.json`](frontend/vercel.json) for automatic SPA rewrites.
 
+### 3. Prevent Render Cold-Starts with Uptime Monitoring
+
+Render free-tier web services automatically sleep after 15 minutes of inactivity. To keep your backend active 24/7 and eliminate initial 30-second cold-start delays:
+
+1. Create a free monitor on [UptimeRobot](https://uptimerobot.com/), [Better Stack](https://betterstack.com/), or [cron-job.org](https://cron-job.org/).
+2. Set monitor type to **HTTP(s)** and set URL to:
+   ```text
+   https://photondrop-backend.onrender.com/api/health
+   ```
+3. Set ping frequency to **every 5 to 10 minutes**.
+4. The built-in `/api/health` endpoint returns `{"status": "online"}`, keeping your instance warm and responsive.
+
 ---
 
 ## 🧪 Test Suite

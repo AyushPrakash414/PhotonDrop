@@ -74,13 +74,16 @@ class QRTransport(VisualTransport):
 
     def encode(self, packet_bytes: bytes) -> np.ndarray:
         """Encode binary data into a QR code image as a numpy array (grayscale)."""
+        import base64
+        # Convert binary packet bytes to Base64 ASCII string to avoid qrcode library glog(0) crashes
+        b64_str = base64.b64encode(packet_bytes).decode("ascii")
         qr = qrcode.QRCode(
             version=None,  # auto-select
             error_correction=self.error_correction,
             box_size=self.box_size,
             border=self.border,
         )
-        qr.add_data(packet_bytes)
+        qr.add_data(b64_str)
         qr.make(fit=True)
 
         # Generate PIL image (mode='1' for black/white)
@@ -92,13 +95,22 @@ class QRTransport(VisualTransport):
     def decode(self, frame: np.ndarray) -> Optional[bytes]:
         """Decode a QR code from a camera frame.
 
-        Tries pyzbar first for raw binary bytes preservation, then falls back to OpenCV.
+        Tries pyzbar first, then falls back to OpenCV.
         Returns None if no QR code is detected.
         """
-        result = self._decode_pyzbar(frame)
-        if result is not None:
-            return result
-        return self._decode_opencv(frame)
+        import base64
+        raw = self._decode_pyzbar(frame)
+        if raw is None:
+            raw = self._decode_opencv(frame)
+
+        if raw is None:
+            return None
+
+        # Attempt Base64 decode to restore original binary packet bytes
+        try:
+            return base64.b64decode(raw, validate=True)
+        except Exception:
+            return raw
 
     def _decode_opencv(self, frame: np.ndarray) -> Optional[bytes]:
         """Attempt QR decode using OpenCV's built-in detector."""

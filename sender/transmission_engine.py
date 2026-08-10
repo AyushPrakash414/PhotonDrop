@@ -13,7 +13,27 @@ import logging
 import time
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QObject, QThread, Signal
+try:
+    from PySide6.QtCore import QObject, QThread, Signal
+except ImportError:
+    class QObject:
+        def __init__(self, *args, **kwargs): pass
+        def moveToThread(self, thread): pass
+
+    class QThread:
+        class _Signal:
+            def connect(self, slot): pass
+        def __init__(self, *args, **kwargs):
+            self.started = self._Signal()
+        def start(self): pass
+        def quit(self): pass
+        def wait(self, msec=3000): pass
+        def isRunning(self): return False
+
+    class Signal:
+        def __init__(self, *args, **kwargs): pass
+        def emit(self, *args, **kwargs): pass
+        def connect(self, slot): pass
 
 from sender.packet_generator import PacketGenerator
 from shared.models import FileMetadata, TransferStats

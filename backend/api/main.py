@@ -57,6 +57,8 @@ if frontend_dist.exists():
     app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
 
+@app.get("/")
+@app.get("/health")
 @app.get("/api/health")
 async def health_check():
     return {"status": "online", "system": "PhotonDrop Optical Core"}

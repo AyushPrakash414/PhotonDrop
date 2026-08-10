@@ -86,10 +86,11 @@ class Reconstruction:
         logger.info("Session detected: %s…", sid.hex()[:8])
 
     def _handle_metadata(self, packet: Packet) -> None:
-        if self.session.state not in (
-            ReceiverState.SESSION_DETECTED,
-            ReceiverState.RECEIVING_METADATA,
-            ReceiverState.RECEIVING_DATA,
+        if self.session.state in (
+            ReceiverState.COMPLETE,
+            ReceiverState.ERROR,
+            ReceiverState.VERIFYING,
+            ReceiverState.DECODING,
         ):
             return
 
@@ -98,20 +99,24 @@ class Reconstruction:
             logger.warning("Failed to parse file metadata")
             return
 
-        self.session.file_metadata = meta
-        self.session.state = ReceiverState.RECEIVING_DATA
-        self._decoder = FountainDecoder(
-            K=meta.total_source_blocks,
-            block_size=meta.block_size,
-            session_id=meta.session_id,
-        )
-        self._reconstruct_start = time.monotonic()
-        logger.info(
-            "Metadata received: %s (%d bytes, %d blocks)",
-            meta.file_name,
-            meta.file_size,
-            meta.total_source_blocks,
-        )
+        if self._decoder is None or self.session.session_id != meta.session_id:
+            self.session = SessionInfo(
+                session_id=meta.session_id,
+                file_metadata=meta,
+                state=ReceiverState.RECEIVING_DATA,
+            )
+            self._decoder = FountainDecoder(
+                K=meta.total_source_blocks,
+                block_size=meta.block_size,
+                session_id=meta.session_id,
+            )
+            self._reconstruct_start = time.monotonic()
+            logger.info(
+                "Metadata received: %s (%d bytes, %d blocks)",
+                meta.file_name,
+                meta.file_size,
+                meta.total_source_blocks,
+            )
 
     def _handle_data(self, packet: Packet) -> None:
         if self.session.state != ReceiverState.RECEIVING_DATA:

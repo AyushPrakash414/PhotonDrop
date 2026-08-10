@@ -70,13 +70,15 @@ class TransmissionWorker(QObject):
         self._running = True
         gen = PacketGenerator(self.metadata, self.blocks)
 
-        # Send SESSION_START and FILE_METADATA as first two frames
-        for special_bytes in [gen.session_start_bytes(), gen.metadata_bytes()]:
-            if not self._running:
-                break
-            img = self.transport.encode(special_bytes)
-            self.frame_ready.emit(img)
-            time.sleep(0.1)  # brief pause for receiver to detect session
+        # Pre-encode session start and metadata images
+        session_start_img = self.transport.encode(gen.session_start_bytes())
+        metadata_img = self.transport.encode(gen.metadata_bytes())
+
+        # Emit initial header frames
+        self.frame_ready.emit(session_start_img)
+        time.sleep(0.1)
+        self.frame_ready.emit(metadata_img)
+        time.sleep(0.1)
 
         frame_interval = 1.0 / self.target_fps
         start_time = time.monotonic()
@@ -85,6 +87,11 @@ class TransmissionWorker(QObject):
         for data_bytes in gen.data_stream():
             if not self._running:
                 break
+
+            # Periodically re-emit metadata every 30 frames (~1 sec) so late-joining receivers lock on immediately
+            if frame_count > 0 and frame_count % 30 == 0:
+                self.frame_ready.emit(metadata_img)
+                time.sleep(frame_interval)
 
             t0 = time.monotonic()
             img = self.transport.encode(data_bytes)

@@ -53,10 +53,18 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
               const canvas = canvasRef.current;
               const ctx = canvas.getContext('2d');
               if (ctx) {
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const frameDataUrl = canvas.toDataURL('image/jpeg', 0.65);
+                const maxDim = 640;
+                let w = video.videoWidth || 640;
+                let h = video.videoHeight || 480;
+                if (Math.max(w, h) > maxDim) {
+                  const scale = maxDim / Math.max(w, h);
+                  w = Math.round(w * scale);
+                  h = Math.round(h * scale);
+                }
+                canvas.width = w;
+                canvas.height = h;
+                ctx.drawImage(video, 0, 0, w, h);
+                const frameDataUrl = canvas.toDataURL('image/jpeg', 0.8);
                 sendReceiverFrame(frameDataUrl).catch(() => {});
               }
             }

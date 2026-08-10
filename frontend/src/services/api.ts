@@ -59,6 +59,15 @@ export async function stopReceiver(): Promise<{ status: string }> {
   return res.json();
 }
 
+export async function sendReceiverFrame(frameB64: string): Promise<{ status: string; state: string }> {
+  const res = await fetch(`${API_BASE}/api/receiver/frame`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ frame_b64: frameB64 }),
+  });
+  return res.json();
+}
+
 export async function resetReceiver(): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/api/receiver/reset`, { method: 'POST' });
   return res.json();

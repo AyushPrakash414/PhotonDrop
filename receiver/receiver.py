@@ -78,6 +78,13 @@ class Receiver:
         """Stop receiving and release the camera."""
         self.camera.stop()
 
+    def process_frame(self, frame: np.ndarray) -> None:
+        """Process an external frame (e.g., received from a mobile/browser camera stream)."""
+        if self.reconstruction.state == ReceiverState.IDLE:
+            self.reconstruction.session.state = ReceiverState.SEARCHING
+            self._notify_state()
+        self._on_camera_frame(frame)
+
     def _on_camera_frame(self, frame: np.ndarray) -> None:
         """Process each camera frame through the full pipeline."""
         # Send preview to UI

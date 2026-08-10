@@ -26,6 +26,33 @@ class StartReceiverRequest(BaseModel):
     camera_index: int = 0
 
 
+class ProcessFrameRequest(BaseModel):
+    frame_b64: str
+
+
+@router.post("/frame")
+async def process_browser_frame(req: ProcessFrameRequest) -> Dict[str, Any]:
+    """Process a base64-encoded frame captured by a mobile or web browser camera."""
+    try:
+        b64_data = req.frame_b64
+        if "," in b64_data:
+            b64_data = b64_data.split(",", 1)[1]
+
+        raw_bytes = base64.b64decode(b64_data)
+        np_arr = np.frombuffer(raw_bytes, np.uint8)
+        import cv2
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        if frame is not None:
+            global_receiver.process_frame(frame)
+            return {"status": "processed", "state": global_receiver.state.name}
+        else:
+            return {"status": "invalid_image"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
 @router.post("/start")
 async def start_receiving(req: StartReceiverRequest = StartReceiverRequest()) -> Dict[str, Any]:
     """Start receiver camera acquisition and visual decoding loop."""

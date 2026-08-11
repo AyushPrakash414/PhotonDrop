@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Set
 
-from fountain.symbols import derive_seed, select_blocks, xor_blocks
 from shared.models import EncodedSymbol
 
 logger = logging.getLogger(__name__)
@@ -95,15 +94,11 @@ class FountainDecoder:
         The decoder immediately attempts peeling if the symbol's
         effective degree is 1.
         """
-        # Determine which source blocks this symbol covers
-        seed = derive_seed(self.session_id, symbol.symbol_id)
-        block_indices = select_blocks(seed, symbol.degree, self.K)
-
         # XOR out any already-recovered blocks
         data = bytearray(symbol.data)
         unresolved: Set[int] = set()
 
-        for idx in block_indices:
+        for idx in symbol.block_indices:
             if idx in self._recovered:
                 # XOR the known block out of this symbol
                 recovered = self._recovered[idx]

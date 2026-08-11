@@ -8,11 +8,10 @@ deterministic PRNG-based block selection.
 
 from __future__ import annotations
 
-import random
 from typing import Iterator, List
 
 from fountain.degree_distribution import DegreeSampler
-from fountain.symbols import derive_seed, select_blocks, xor_blocks
+from fountain.symbols import symbol_plan, xor_blocks
 from shared.models import EncodedSymbol
 
 
@@ -51,15 +50,12 @@ class FountainEncoder:
         symbol_id = self._next_id
         self._next_id += 1
 
-        # Derive deterministic seed
-        seed = derive_seed(self.session_id, symbol_id)
-        rng = random.Random(seed)
-
-        # Sample degree from Robust Soliton Distribution
-        degree = self.sampler.sample(rng)
-
-        # Select source block indices
-        block_indices = select_blocks(seed, degree, self.K)
+        degree, block_indices = symbol_plan(
+            self.session_id,
+            symbol_id,
+            self.K,
+            self.sampler,
+        )
 
         # XOR selected blocks
         selected = [self.blocks[i] for i in block_indices]

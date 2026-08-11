@@ -15,7 +15,7 @@ export const QRViewer: React.FC<QRViewerProps> = ({ isTransmitting, frameB64 }) 
 
         <div className={`qr-display-box ${isTransmitting ? 'transmitting' : ''}`}>
           {frameB64 ? (
-            <img src={`data:image/jpeg;base64,${frameB64}`} alt="Optical Data Frame" className="qr-frame-img" />
+            <img src={`data:image/png;base64,${frameB64}`} alt="Optical Data Frame" className="qr-frame-img" />
           ) : (
             <div className="qr-placeholder">
               <div className="placeholder-grid" />

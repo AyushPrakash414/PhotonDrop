@@ -17,6 +17,7 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frameInFlightRef = useRef(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasWebcamAccess, setHasWebcamAccess] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -32,6 +33,9 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
       const startWebCamera = async () => {
         try {
           setCameraError(null);
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Camera access requires HTTPS or localhost in this browser');
+          }
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: { ideal: facingMode },
@@ -48,6 +52,9 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
 
           // Capture frames at ~10 FPS and transmit to Python receiver pipeline
           frameInterval = window.setInterval(() => {
+            if (frameInFlightRef.current) {
+              return;
+            }
             if (videoRef.current && canvasRef.current && videoRef.current.readyState === 4) {
               const video = videoRef.current;
               const canvas = canvasRef.current;
@@ -65,7 +72,17 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
                 canvas.height = h;
                 ctx.drawImage(video, 0, 0, w, h);
                 const frameDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                sendReceiverFrame(frameDataUrl).catch(() => {});
+                frameInFlightRef.current = true;
+                sendReceiverFrame(frameDataUrl)
+                  .then(() => {
+                    setCameraError(null);
+                  })
+                  .catch((err: any) => {
+                    setCameraError(err.message || 'Frame processing failed');
+                  })
+                  .finally(() => {
+                    frameInFlightRef.current = false;
+                  });
               }
             }
           }, 100);
@@ -83,6 +100,7 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
     }
 
     return () => {
+      frameInFlightRef.current = false;
       if (frameInterval) clearInterval(frameInterval);
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());

@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from typing import List
-
-from shared.models import EncodedSymbol
+from typing import List, Optional, Tuple
 
 
 def derive_seed(session_id: bytes, symbol_id: int) -> int:
@@ -39,6 +37,34 @@ def select_blocks(
     indices = rng.sample(range(K), min(degree, K))
     indices.sort()
     return indices
+
+
+def symbol_plan(
+    session_id: bytes,
+    symbol_id: int,
+    K: int,
+    sampler: Optional["DegreeSampler"] = None,
+) -> Tuple[int, List[int]]:
+    """Return the deterministic degree and source-block set for a symbol.
+
+    The first K symbols are systematic degree-1 symbols. That gives receivers
+    an immediate ripple on clean captures while preserving the fountain stream
+    for all later symbols.
+    """
+    if K < 1:
+        raise ValueError("K must be >= 1")
+    if symbol_id < K:
+        return 1, [symbol_id]
+
+    if sampler is None:
+        from fountain.degree_distribution import DegreeSampler
+
+        sampler = DegreeSampler(K)
+
+    seed = derive_seed(session_id, symbol_id)
+    rng = random.Random(seed)
+    degree = sampler.sample(rng)
+    return degree, select_blocks(seed, degree, K)
 
 
 def xor_blocks(blocks: List[bytes]) -> bytes:

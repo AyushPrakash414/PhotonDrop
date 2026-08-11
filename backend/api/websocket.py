@@ -50,6 +50,12 @@ def _frame_to_base64_jpeg(frame: np.ndarray, quality: int = 80) -> str:
     return base64.b64encode(buffer).decode("utf-8")
 
 
+def _frame_to_base64_png(frame: np.ndarray) -> str:
+    """Encode high-contrast QR frames losslessly for browser display."""
+    _, buffer = cv2.imencode(".png", frame)
+    return base64.b64encode(buffer).decode("utf-8")
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket streaming endpoint for the React frontend."""
@@ -65,7 +71,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if global_sender.is_transmitting:
                 if _latest_sender_frame is not None:
                     rendered = render_frame(_latest_sender_frame, canvas_size=(400, 400))
-                    sender_frame_b64 = _frame_to_base64_jpeg(rendered, quality=85)
+                    sender_frame_b64 = _frame_to_base64_png(rendered)
 
                 if global_sender.engine._worker:
                     stats = global_sender.engine._worker._stats
@@ -79,7 +85,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Gather Receiver State
             receiver_frame_b64 = None
             receiver_payload = None
-            is_receiver_active = global_receiver.camera.is_running or global_receiver.state.name != "IDLE"
+            is_receiver_active = global_receiver.is_active or global_receiver.state.name != "IDLE"
             if is_receiver_active:
                 if _latest_receiver_frame is not None:
                     receiver_frame_b64 = _frame_to_base64_jpeg(_latest_receiver_frame, quality=70)

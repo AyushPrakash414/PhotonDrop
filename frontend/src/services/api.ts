@@ -45,12 +45,16 @@ export async function stopSender(): Promise<{ status: string }> {
   return res.json();
 }
 
-export async function startReceiver(cameraIndex = 0): Promise<{ status: string }> {
+export async function startReceiver(cameraIndex = 0, mode: 'browser' | 'server' = 'browser'): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/api/receiver/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ camera_index: cameraIndex }),
+    body: JSON.stringify({ camera_index: cameraIndex, mode }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to start receiver');
+  }
   return res.json();
 }
 
@@ -65,6 +69,10 @@ export async function sendReceiverFrame(frameB64: string): Promise<{ status: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ frame_b64: frameB64 }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to process camera frame');
+  }
   return res.json();
 }
 

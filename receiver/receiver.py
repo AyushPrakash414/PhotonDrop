@@ -40,6 +40,7 @@ class Receiver:
 
         self._decode_count = 0
         self._decode_start = 0.0
+        self._external_stream_active = False
 
     @property
     def state(self) -> ReceiverState:
@@ -48,6 +49,36 @@ class Receiver:
     @property
     def progress(self) -> float:
         return self.reconstruction.progress
+
+    @property
+    def is_active(self) -> bool:
+        return self.camera.is_running or self._external_stream_active
+
+    def start_external_stream(
+        self,
+        on_state_change: Optional[Callable] = None,
+        on_stats_update: Optional[Callable] = None,
+        on_preview_frame: Optional[Callable] = None,
+    ) -> None:
+        """Start receiving frames supplied by the browser/mobile frontend."""
+        self.stop()
+        self._on_state_change = on_state_change
+        self._on_stats_update = on_stats_update
+        self._on_preview_frame = on_preview_frame
+        self._decode_count = 0
+        self._decode_start = time.monotonic()
+        self._external_stream_active = True
+
+        if self.reconstruction.state in (
+            ReceiverState.IDLE,
+            ReceiverState.COMPLETE,
+            ReceiverState.ERROR,
+        ):
+            if self.reconstruction.state in (ReceiverState.COMPLETE, ReceiverState.ERROR):
+                self.reset()
+                self._external_stream_active = True
+            self.reconstruction.session.state = ReceiverState.SEARCHING
+            self._notify_state()
 
     def start(
         self,
@@ -76,10 +107,13 @@ class Receiver:
 
     def stop(self) -> None:
         """Stop receiving and release the camera."""
+        self._external_stream_active = False
         self.camera.stop()
 
     def process_frame(self, frame: np.ndarray) -> None:
         """Process an external frame (e.g., received from a mobile/browser camera stream)."""
+        if not self.is_active:
+            self.start_external_stream(on_preview_frame=self._on_preview_frame)
         if self.reconstruction.state == ReceiverState.IDLE:
             self.reconstruction.session.state = ReceiverState.SEARCHING
             self._notify_state()
@@ -140,5 +174,6 @@ class Receiver:
 
     def reset(self) -> None:
         """Reset for a new transfer."""
+        self._external_stream_active = False
         self.processor.reset()
         self.reconstruction.reset()

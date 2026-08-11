@@ -24,8 +24,7 @@ import pytest
 
 from fountain.decoder import FountainDecoder
 from fountain.encoder import FountainEncoder
-from fountain.symbols import derive_seed, select_blocks
-from fountain.degree_distribution import DegreeSampler
+from fountain.symbols import symbol_plan
 from sender.file_reader import split_into_blocks
 from shared.constants import (
     PACKET_TYPE_DATA,
@@ -119,7 +118,6 @@ class TestEndToEnd:
         )
 
         # Feed data packets
-        sampler = DegreeSampler(K)
         for raw in surviving:
             pkt = deserialize_packet(raw)
             if pkt is None:
@@ -128,10 +126,7 @@ class TestEndToEnd:
                 continue
 
             sid = pkt.header.symbol_id
-            seed = derive_seed(parsed_meta.session_id, sid)
-            rng = random.Random(seed)
-            degree = sampler.sample(rng)
-            block_indices = select_blocks(seed, degree, K)
+            degree, block_indices = symbol_plan(parsed_meta.session_id, sid, K)
 
             symbol = EncodedSymbol(
                 symbol_id=sid,

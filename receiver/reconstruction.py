@@ -12,13 +12,12 @@ and safe file saving.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Optional
 
 from fountain.decoder import FountainDecoder
-from fountain.symbols import derive_seed, select_blocks
+from fountain.symbols import symbol_plan
 from sender.file_reader import sanitize_filename
 from shared.constants import (
     PACKET_TYPE_DATA,
@@ -127,14 +126,7 @@ class Reconstruction:
         # Build an EncodedSymbol from the packet
         sid = packet.header.symbol_id
         meta = self.session.file_metadata
-        seed = derive_seed(meta.session_id, sid)
-        # We need to sample the degree the same way the encoder did
-        from fountain.degree_distribution import DegreeSampler
-        sampler = DegreeSampler(meta.total_source_blocks)
-        import random
-        rng = random.Random(seed)
-        degree = sampler.sample(rng)
-        block_indices = select_blocks(seed, degree, meta.total_source_blocks)
+        degree, block_indices = symbol_plan(meta.session_id, sid, meta.total_source_blocks)
 
         symbol = EncodedSymbol(
             symbol_id=sid,

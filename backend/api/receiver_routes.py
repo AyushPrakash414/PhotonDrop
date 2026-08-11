@@ -7,9 +7,11 @@ Wraps the existing core Receiver instance.
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any, Dict
 
+import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -24,6 +26,7 @@ global_receiver = Receiver(output_dir=Path("received_files"))
 
 class StartReceiverRequest(BaseModel):
     camera_index: int = 0
+    mode: str = "browser"
 
 
 class ProcessFrameRequest(BaseModel):
@@ -58,12 +61,20 @@ async def process_browser_frame(req: ProcessFrameRequest) -> Dict[str, Any]:
 @router.post("/start")
 async def start_receiving(req: StartReceiverRequest = StartReceiverRequest()) -> Dict[str, Any]:
     """Start receiver camera acquisition and visual decoding loop."""
+    from backend.api.websocket import _on_receiver_preview
+
+    if req.mode == "browser":
+        global_receiver.start_external_stream(on_preview_frame=_on_receiver_preview)
+        return {"status": "browser_ready", "mode": "browser"}
+
+    if req.mode != "server":
+        raise HTTPException(status_code=400, detail="Receiver mode must be 'browser' or 'server'")
+
     if global_receiver.camera.is_running:
         return {"status": "already_running"}
 
-    from backend.api.websocket import _on_receiver_preview
     global_receiver.start(camera_index=req.camera_index, on_preview_frame=_on_receiver_preview)
-    return {"status": "started", "camera_index": req.camera_index}
+    return {"status": "started", "mode": "server", "camera_index": req.camera_index}
 
 
 @router.post("/stop")
@@ -101,7 +112,7 @@ async def get_receiver_status() -> Dict[str, Any]:
     stats = global_receiver.processor.stats
 
     return {
-        "is_active": global_receiver.camera.is_running,
+        "is_active": global_receiver.is_active,
         "state": global_receiver.state.name,
         "progress": round(global_receiver.progress * 100, 2),
         "metadata": meta_dict,

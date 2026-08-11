@@ -27,7 +27,7 @@ export function useReceiver() {
   const handleStart = useCallback(async (cameraIndex = 0) => {
     setError(null);
     try {
-      await startReceiver(cameraIndex);
+      await startReceiver(cameraIndex, 'browser');
     } catch (e: any) {
       setError(e.message || 'Failed to start camera');
     }

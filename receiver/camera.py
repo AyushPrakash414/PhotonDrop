@@ -1,63 +1,45 @@
 """
 PhotonDrop — Camera Capture
 
-Non-blocking OpenCV camera capture running in a background QThread.
+Non-blocking OpenCV camera capture running in a background daemon thread.
 Emits raw frames for the receiver pipeline.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
-try:
-    from PySide6.QtCore import QObject, QThread, Signal
-except ImportError:
-    class QObject:
-        def __init__(self, *args, **kwargs): pass
-        def moveToThread(self, thread): pass
-
-    class QThread:
-        class _Signal:
-            def connect(self, slot): pass
-        def __init__(self, *args, **kwargs):
-            self.started = self._Signal()
-        def start(self): pass
-        def quit(self): pass
-        def wait(self, msec=3000): pass
-        def isRunning(self): return False
-
-    class Signal:
-        def __init__(self, *args, **kwargs): pass
-        def emit(self, *args, **kwargs): pass
-        def connect(self, slot): pass
 
 logger = logging.getLogger(__name__)
 
 
-class CameraWorker(QObject):
+class CameraWorker:
     """Background worker that captures frames from an OpenCV camera."""
 
-    frame_captured = Signal(object)   # np.ndarray (BGR)
-    fps_updated = Signal(float)
-    error = Signal(str)
-    finished = Signal()
-
     def __init__(self, camera_index: int = 0, target_fps: int = 60):
-        super().__init__()
         self.camera_index = camera_index
         self.target_fps = target_fps
         self._running = False
+        self.on_frame: Optional[Callable] = None
+        self.on_fps: Optional[Callable] = None
+        self.on_error: Optional[Callable] = None
+        self.on_finished: Optional[Callable] = None
 
     def run(self) -> None:
-        """Main capture loop — connect to QThread.started."""
+        """Main capture loop — runs in a background daemon thread."""
         cap = cv2.VideoCapture(self.camera_index)
         if not cap.isOpened():
-            self.error.emit(f"Cannot open camera {self.camera_index}")
-            self.finished.emit()
+            err_msg = f"Cannot open camera {self.camera_index}"
+            logger.error(err_msg)
+            if self.on_error:
+                self.on_error(err_msg)
+            if self.on_finished:
+                self.on_finished()
             return
 
         # Attempt to set camera properties
@@ -72,76 +54,76 @@ class CameraWorker(QObject):
 
         logger.info("Camera %d opened — capturing at %d FPS target", self.camera_index, self.target_fps)
 
-        while self._running:
-            t0 = time.monotonic()
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning("Camera read failed — retrying")
-                time.sleep(0.01)
-                continue
+        try:
+            while self._running:
+                t0 = time.monotonic()
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning("Camera read failed — retrying")
+                    time.sleep(0.01)
+                    continue
 
-            self.frame_captured.emit(frame)
-            frame_count += 1
+                if self.on_frame:
+                    self.on_frame(frame)
+                frame_count += 1
 
-            # Update FPS every 30 frames
-            if frame_count % 30 == 0:
-                elapsed = time.monotonic() - t_start
-                fps = frame_count / elapsed if elapsed > 0 else 0
-                self.fps_updated.emit(fps)
+                # Update FPS every 30 frames
+                if frame_count % 30 == 0:
+                    elapsed = time.monotonic() - t_start
+                    fps = frame_count / elapsed if elapsed > 0 else 0
+                    if self.on_fps:
+                        self.on_fps(fps)
 
-            # Throttle
-            dt = time.monotonic() - t0
-            sleep = frame_interval - dt
-            if sleep > 0:
-                time.sleep(sleep)
-
-        cap.release()
-        logger.info("Camera released")
-        self.finished.emit()
+                # Throttle
+                dt = time.monotonic() - t0
+                sleep = frame_interval - dt
+                if sleep > 0:
+                    time.sleep(sleep)
+        finally:
+            cap.release()
+            logger.info("Camera released")
+            if self.on_finished:
+                self.on_finished()
 
     def stop(self) -> None:
         self._running = False
 
 
 class CameraCapture:
-    """Manages the camera QThread lifecycle."""
+    """Manages the camera background thread lifecycle."""
 
     def __init__(self):
-        self._thread: Optional[QThread] = None
+        self._thread: Optional[threading.Thread] = None
         self._worker: Optional[CameraWorker] = None
 
     def start(
         self,
         camera_index: int = 0,
-        on_frame=None,
-        on_fps=None,
-        on_error=None,
+        on_frame: Optional[Callable] = None,
+        on_fps: Optional[Callable] = None,
+        on_error: Optional[Callable] = None,
     ) -> None:
         self.stop()
-        self._thread = QThread()
         self._worker = CameraWorker(camera_index)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._thread.quit)
+        self._worker.on_frame = on_frame
+        self._worker.on_fps = on_fps
+        self._worker.on_error = on_error
 
-        if on_frame:
-            self._worker.frame_captured.connect(on_frame)
-        if on_fps:
-            self._worker.fps_updated.connect(on_fps)
-        if on_error:
-            self._worker.error.connect(on_error)
-
+        self._thread = threading.Thread(
+            target=self._worker.run,
+            daemon=True,
+            name="PhotonDrop-CameraCapture",
+        )
         self._thread.start()
 
     def stop(self) -> None:
         if self._worker:
             self._worker.stop()
-        if self._thread and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(3000)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
         self._thread = None
         self._worker = None
 
     @property
     def is_running(self) -> bool:
-        return self._thread is not None and self._thread.isRunning()
+        return self._thread is not None and self._thread.is_alive()

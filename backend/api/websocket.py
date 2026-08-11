@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.api.receiver_routes import global_receiver
 from backend.api.sender_routes import global_sender
+from shared.models import ReceiverState
 from visual.renderer import render_frame
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Gather Receiver State
             receiver_frame_b64 = None
             receiver_payload = None
-            is_receiver_active = global_receiver.is_active or global_receiver.state.name != "IDLE"
+            is_receiver_active = global_receiver.is_active or global_receiver.state != ReceiverState.IDLE
             if is_receiver_active:
                 if _latest_receiver_frame is not None:
                     receiver_frame_b64 = _frame_to_base64_jpeg(_latest_receiver_frame, quality=70)

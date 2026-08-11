@@ -8,6 +8,7 @@ export function useSender() {
     is_transmitting: false,
     metadata: null,
   });
+  const [fileBuffer, setFileBuffer] = useState<Uint8Array | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +30,8 @@ export function useSender() {
     setLoading(true);
     setError(null);
     try {
+      const arrayBuf = await file.arrayBuffer();
+      setFileBuffer(new Uint8Array(arrayBuf));
       const res = await selectSenderFile(file);
       setSenderState((prev) => ({ ...prev, metadata: res.metadata }));
     } catch (e: any) {
@@ -53,14 +56,16 @@ export function useSender() {
 
   const handleStart = useCallback(async (fps = 30) => {
     setError(null);
+    setSenderState((prev) => ({ ...prev, is_transmitting: true }));
     try {
       await startSender(fps);
     } catch (e: any) {
-      setError(e.message || 'Failed to start transmission');
+      console.warn('Backend start error, continuing local optical streaming:', e);
     }
   }, []);
 
   const handleStop = useCallback(async () => {
+    setSenderState((prev) => ({ ...prev, is_transmitting: false }));
     try {
       await stopSender();
     } catch (e: any) {
@@ -70,6 +75,7 @@ export function useSender() {
 
   return {
     senderState,
+    fileBuffer,
     loading,
     error,
     selectFile: handleSelectFile,

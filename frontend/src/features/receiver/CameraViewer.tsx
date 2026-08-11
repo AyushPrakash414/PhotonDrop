@@ -1,19 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
+import jsQR from 'jsqr';
 import { Camera, Eye, SwitchCamera } from 'lucide-react';
 import { ReceiverStatus } from '../../types/receiver';
 import { sendReceiverFrame } from '../../services/api';
+import { parseFrame, FountainDecoder, Manifest, sha256Hex } from '../../services/codec';
 import './CameraViewer.css';
 
 interface CameraViewerProps {
   isActive: boolean;
   frameB64?: string | null;
   status?: ReceiverStatus;
+  onClientFrameDecoded?: (frameText: string) => void;
 }
 
 export const CameraViewer: React.FC<CameraViewerProps> = ({
   isActive,
   frameB64,
   status,
+  onClientFrameDecoded,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -24,7 +28,7 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
 
   const isDetected = status && ['RECEIVING_DATA', 'DECODING', 'RECONSTRUCTING', 'VERIFYING', 'COMPLETE'].includes(status);
 
-  // Initialize browser/mobile camera stream using getUserMedia
+  // Initialize browser/mobile camera stream using getUserMedia and jsQR decoding
   useEffect(() => {
     let stream: MediaStream | null = null;
     let frameInterval: number | null = null;
@@ -50,42 +54,57 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
             setHasWebcamAccess(true);
           }
 
-          // Capture frames at ~10 FPS and transmit to Python receiver pipeline
+          // Capture & scan frames at high speed (30 FPS target)
           frameInterval = window.setInterval(() => {
-            if (frameInFlightRef.current) {
-              return;
-            }
-            if (videoRef.current && canvasRef.current && videoRef.current.readyState === 4) {
+            if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
               const video = videoRef.current;
               const canvas = canvasRef.current;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                const maxDim = 640;
-                let w = video.videoWidth || 640;
-                let h = video.videoHeight || 480;
-                if (Math.max(w, h) > maxDim) {
-                  const scale = maxDim / Math.max(w, h);
-                  w = Math.round(w * scale);
-                  h = Math.round(h * scale);
-                }
-                canvas.width = w;
-                canvas.height = h;
-                ctx.drawImage(video, 0, 0, w, h);
-                const frameDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                frameInFlightRef.current = true;
-                sendReceiverFrame(frameDataUrl)
-                  .then(() => {
-                    setCameraError(null);
-                  })
-                  .catch((err: any) => {
-                    setCameraError(err.message || 'Frame processing failed');
-                  })
-                  .finally(() => {
-                    frameInFlightRef.current = false;
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              if (ctx && video.videoWidth && video.videoHeight) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // High-speed client-side jsQR decode
+                try {
+                  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                  const qrCode = jsQR(imgData.data, imgData.width, imgData.height, {
+                    inversionAttempts: 'dontInvert',
                   });
+                  if (qrCode?.data) {
+                    if (onClientFrameDecoded) {
+                      onClientFrameDecoded(qrCode.data);
+                    }
+                  }
+                } catch (e) {
+                  /* jsQR scan error */
+                }
+
+                // Send frame to backend REST endpoint asynchronously
+                if (!frameInFlightRef.current) {
+                  const maxDim = 640;
+                  let w = video.videoWidth;
+                  let h = video.videoHeight;
+                  if (Math.max(w, h) > maxDim) {
+                    const scale = maxDim / Math.max(w, h);
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                  }
+                  canvas.width = w;
+                  canvas.height = h;
+                  ctx.drawImage(video, 0, 0, w, h);
+                  const frameDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                  frameInFlightRef.current = true;
+                  sendReceiverFrame(frameDataUrl)
+                    .then(() => setCameraError(null))
+                    .catch((err: any) => setCameraError(err.message || 'Backend frame sync issue'))
+                    .finally(() => {
+                      frameInFlightRef.current = false;
+                    });
+                }
               }
             }
-          }, 100);
+          }, 33);
         } catch (err: any) {
           console.warn('Browser webcam access failed, falling back to server camera stream:', err);
           setHasWebcamAccess(false);
@@ -106,7 +125,7 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [isActive, facingMode]);
+  }, [isActive, facingMode, onClientFrameDecoded]);
 
   const toggleCameraFacing = () => {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
@@ -158,7 +177,7 @@ export const CameraViewer: React.FC<CameraViewerProps> = ({
       <div className="camera-viewer-footer">
         <div className="signal-status font-mono">
           <Eye size={16} color={isActive ? 'var(--success)' : 'var(--text-muted)'} />
-          <span>{isActive ? (hasWebcamAccess ? 'MOBILE CAMERA SCANNING' : 'SERVER CAMERA SCANNING') : 'OFFLINE'}</span>
+          <span>{isActive ? (hasWebcamAccess ? 'MOBILE CAMERA SCANNING (30 FPS)' : 'SERVER CAMERA SCANNING') : 'OFFLINE'}</span>
         </div>
 
         {isActive && hasWebcamAccess && (

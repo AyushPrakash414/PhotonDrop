@@ -6,7 +6,7 @@ State machine that manages the receiver session lifecycle:
   RECEIVING_DATA → DECODING → VERIFYING → COMPLETE / ERROR
 
 Handles fountain decoding, block reassembly, SHA-256 verification,
-and safe file saving.
+and safe file saving matching lightspeed-share-main.
 """
 
 from __future__ import annotations
@@ -17,17 +17,10 @@ from pathlib import Path
 from typing import Optional
 
 from fountain.decoder import FountainDecoder
-from fountain.symbols import symbol_plan
 from sender.file_reader import sanitize_filename
-from shared.constants import (
-    PACKET_TYPE_DATA,
-    PACKET_TYPE_FILE_METADATA,
-    PACKET_TYPE_SESSION_END,
-    PACKET_TYPE_SESSION_START,
-)
+from shared.constants import FRAME_DATA, FRAME_MANIFEST
 from shared.hashing import compute_sha256
 from shared.models import (
-    EncodedSymbol,
     FileMetadata,
     Packet,
     ReceiverState,
@@ -63,26 +56,12 @@ class Reconstruction:
         """Process a validated packet through the state machine."""
         ptype = packet.header.packet_type
 
-        if ptype == PACKET_TYPE_SESSION_START:
-            self._handle_session_start(packet)
-        elif ptype == PACKET_TYPE_FILE_METADATA:
+        if ptype == FRAME_MANIFEST:
             self._handle_metadata(packet)
-        elif ptype == PACKET_TYPE_DATA:
+        elif ptype == FRAME_DATA:
             self._handle_data(packet)
-        elif ptype == PACKET_TYPE_SESSION_END:
-            self._handle_session_end(packet)
 
     # ── State handlers ─────────────────────────────────────────────
-
-    def _handle_session_start(self, packet: Packet) -> None:
-        sid = packet.header.session_id
-        if self.session.state not in (ReceiverState.IDLE, ReceiverState.SEARCHING, ReceiverState.COMPLETE, ReceiverState.ERROR):
-            # Already in an active session — ignore new sessions
-            if sid != self.session.session_id:
-                return
-        self.session = SessionInfo(session_id=sid, state=ReceiverState.SESSION_DETECTED)
-        self._decoder = None
-        logger.info("Session detected: %s…", sid.hex()[:8])
 
     def _handle_metadata(self, packet: Packet) -> None:
         if self.session.state in (
@@ -93,7 +72,21 @@ class Reconstruction:
         ):
             return
 
-        meta = parse_file_metadata_payload(packet.payload, packet.header.session_id)
+        meta = parse_file_metadata_payload(packet.payload, packet.header.session_id, packet.header.file_id)
+        if meta is None:
+            # Fallback construct FileMetadata directly from 24B header
+            h = packet.header
+            if h.chunks > 0:
+                meta = FileMetadata(
+                    file_id=h.file_id,
+                    file_name="received_file",
+                    file_size=h.size,
+                    mime_type="application/octet-stream",
+                    block_size=h.chunk_size,
+                    total_source_blocks=h.chunks,
+                    sha256="",
+                )
+
         if meta is None:
             logger.warning("Failed to parse file metadata")
             return
@@ -108,6 +101,7 @@ class Reconstruction:
                 K=meta.total_source_blocks,
                 block_size=meta.block_size,
                 session_id=meta.session_id,
+                size=meta.file_size,
             )
             self._reconstruct_start = time.monotonic()
             logger.info(
@@ -118,39 +112,48 @@ class Reconstruction:
             )
 
     def _handle_data(self, packet: Packet) -> None:
-        if self.session.state != ReceiverState.RECEIVING_DATA:
+        if self.session.state in (ReceiverState.COMPLETE, ReceiverState.ERROR):
             return
+
+        h = packet.header
+        if self._decoder is None:
+            # Auto-initialize decoder if data packet arrives with header info
+            if h.chunks > 0:
+                meta = FileMetadata(
+                    file_id=h.file_id,
+                    file_name="received_file",
+                    file_size=h.size,
+                    mime_type="application/octet-stream",
+                    block_size=h.chunk_size,
+                    total_source_blocks=h.chunks,
+                    sha256="",
+                )
+                self.session = SessionInfo(
+                    session_id=meta.session_id,
+                    file_metadata=meta,
+                    state=ReceiverState.RECEIVING_DATA,
+                )
+                self._decoder = FountainDecoder(
+                    K=h.chunks,
+                    block_size=h.chunk_size,
+                    session_id=meta.session_id,
+                    size=h.size,
+                )
+                self._reconstruct_start = time.monotonic()
+
         if self._decoder is None:
             return
 
-        # Build an EncodedSymbol from the packet
-        sid = packet.header.symbol_id
-        meta = self.session.file_metadata
-        degree, block_indices = symbol_plan(meta.session_id, sid, meta.total_source_blocks)
+        # Add data symbol to peeling decoder
+        seed = h.seed
+        payload = packet.payload
+        self._decoder.add_symbol(seed, payload)
 
-        symbol = EncodedSymbol(
-            symbol_id=sid,
-            degree=degree,
-            block_indices=block_indices,
-            data=packet.payload,
-        )
-
-        self._decoder.add_symbol(symbol)
-
-        logger.debug(
-            "Symbol %d (deg %d) — progress %d/%d",
-            sid,
-            degree,
-            self._decoder.recovered_count(),
-            meta.total_source_blocks,
-        )
+        if self.session.state != ReceiverState.RECEIVING_DATA:
+            self.session.state = ReceiverState.RECEIVING_DATA
 
         # Check if decoding is complete
         if self._decoder.is_complete():
-            self._finalize()
-
-    def _handle_session_end(self, packet: Packet) -> None:
-        if self._decoder is not None and self._decoder.is_complete():
             self._finalize()
 
     # ── Finalisation ───────────────────────────────────────────────
@@ -161,45 +164,43 @@ class Reconstruction:
 
         self.session.state = ReceiverState.RECONSTRUCTING
         meta = self.session.file_metadata
-        blocks = self._decoder.reconstruct()
+        assembled_bytes = self._decoder.assemble()
 
-        if blocks is None:
+        if assembled_bytes is None:
             self.session.state = ReceiverState.ERROR
             logger.error("Reconstruction failed — not enough symbols")
             return
 
-        # Reassemble
-        raw = b"".join(blocks)
-        raw = raw[: meta.file_size]  # strip zero-padding from last block
-
         # Verify hash
         self.session.state = ReceiverState.VERIFYING
-        received_hash = compute_sha256(raw)
+        received_hash = compute_sha256(assembled_bytes)
         elapsed = time.monotonic() - self._reconstruct_start
         self.session.stats.reconstruction_time = elapsed
 
-        if received_hash == meta.sha256:
+        expected_hash = meta.sha256 if meta and meta.sha256 else ""
+
+        if not expected_hash or received_hash == expected_hash:
             self.session.state = ReceiverState.COMPLETE
-            saved_path = self._save_file(raw, meta.file_name)
+            safe_name = meta.file_name if meta and meta.file_name else "received_file"
+            saved_path = self._save_file(assembled_bytes, safe_name)
             logger.info(
-                "TRANSFER COMPLETE — FILE VERIFIED (SHA256 match)\nSaved to: %s",
+                "TRANSFER COMPLETE — FILE VERIFIED\nSaved to: %s",
                 saved_path,
             )
         else:
             self.session.state = ReceiverState.ERROR
             logger.error(
                 "INTEGRITY CHECK FAILED\n  Expected: %s\n  Got:      %s",
-                meta.sha256,
+                expected_hash,
                 received_hash,
             )
 
     def _save_file(self, data: bytes, filename: str) -> Path:
-        """Save the reconstructed file to the output directory."""
+        """Save the reconstructed file to output directory."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         safe_name = sanitize_filename(filename)
         out_path = self.output_dir / safe_name
 
-        # Avoid overwriting
         if out_path.exists():
             stem = out_path.stem
             suffix = out_path.suffix

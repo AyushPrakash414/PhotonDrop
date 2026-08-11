@@ -1,8 +1,7 @@
 """
 PhotonDrop — Visual Decoder
 
-Decodes visual frames (QR codes) back into binary packet data and
-then deserializes them into Packet objects.
+Decodes visual frames (QR codes) back into Base64 packet strings or binary data.
 """
 
 from __future__ import annotations
@@ -24,16 +23,7 @@ def decode_frame_to_bytes(
     frame: np.ndarray,
     transport: Optional[VisualTransport] = None,
 ) -> Optional[bytes]:
-    """Decode a camera frame into raw binary packet bytes using multi-pass detection.
-
-    Tries:
-      1. Original frame directly (fastest, best for clear screen photos)
-      2. Grayscale conversion
-      3. CLAHE contrast enhancement (best for low-contrast/dim screens)
-      4. Adaptive thresholding (best for glared/reflective screens)
-
-    Returns None if no valid visual data is detected.
-    """
+    """Decode a camera frame into optical frame bytes using multi-pass detection."""
     if transport is None:
         transport = QRTransport()
 
@@ -73,11 +63,7 @@ def decode_frame_to_packet(
     frame: np.ndarray,
     transport: Optional[VisualTransport] = None,
 ) -> Optional[Packet]:
-    """Decode a camera frame all the way into a validated Packet.
-
-    Returns None if the frame cannot be decoded or the packet
-    fails validation (bad magic, checksum, etc.).
-    """
+    """Decode a camera frame all the way into a validated Packet."""
     raw = decode_frame_to_bytes(frame, transport)
     if raw is None:
         return None

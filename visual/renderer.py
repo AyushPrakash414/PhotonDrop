@@ -17,7 +17,7 @@ def render_frame(
     qr_image: np.ndarray,
     canvas_size: Tuple[int, int] = (800, 800),
     bg_color: int = 255,
-    margin: int = 40,
+    margin: int = 20,
 ) -> np.ndarray:
     """Place a QR image centred on a white canvas with margins.
 

@@ -1,155 +1,149 @@
 """
-PhotonDrop — Visual Encoder
+PhotonDrop — Visual Transport (QR Encoder & Decoder)
 
-Abstract VisualTransport base class and QRTransport implementation
-that converts binary packets into renderable QR code images.
+Encodes optical frame Base64 payloads into high-visibility QR code images.
+Decodes camera frames back into Base64 strings with multi-stage OpenCV detection.
+Matches lightspeed-share-main optical frame rendering.
 """
 
 from __future__ import annotations
 
-import io
-from abc import ABC, abstractmethod
-from typing import Optional
+import logging
+from typing import Optional, Union
 
+import cv2
 import numpy as np
+import qrcode
+from qrcode.constants import (
+    ERROR_CORRECT_H,
+    ERROR_CORRECT_L,
+    ERROR_CORRECT_M,
+    ERROR_CORRECT_Q,
+)
 
-try:
-    import qrcode
-    from qrcode.constants import (
-        ERROR_CORRECT_H,
-        ERROR_CORRECT_L,
-        ERROR_CORRECT_M,
-        ERROR_CORRECT_Q,
-    )
-except ImportError:
-    qrcode = None  # type: ignore
-
-from shared.serialization import serialize_packet
-from shared.models import Packet
+logger = logging.getLogger(__name__)
 
 _EC_MAP = {
-    "L": ERROR_CORRECT_L if qrcode else 0,
-    "M": ERROR_CORRECT_M if qrcode else 1,
-    "Q": ERROR_CORRECT_Q if qrcode else 2,
-    "H": ERROR_CORRECT_H if qrcode else 3,
+    "L": ERROR_CORRECT_L,
+    "M": ERROR_CORRECT_M,
+    "Q": ERROR_CORRECT_Q,
+    "H": ERROR_CORRECT_H,
 }
 
 
-class VisualTransport(ABC):
-    """Abstract base class for visual encoding/decoding transport."""
+class VisualTransport:
+    """Abstract base class for visual transport mechanisms."""
 
-    @abstractmethod
-    def encode(self, packet_bytes: bytes) -> np.ndarray:
-        """Encode binary packet data into a visual image (numpy array, BGR/grayscale)."""
-        ...
+    def encode(self, packet_bytes: Union[bytes, str]) -> np.ndarray:
+        raise NotImplementedError
 
-    @abstractmethod
     def decode(self, frame: np.ndarray) -> Optional[bytes]:
-        """Decode a visual image back into binary packet data.
-
-        Returns None if the frame cannot be decoded.
-        """
-        ...
+        raise NotImplementedError
 
 
 class QRTransport(VisualTransport):
-    """QR-code based visual transport.
+    """QR Code visual transport mechanism.
 
-    Encodes binary packet data into QR code images and decodes
-    QR codes from camera frames.
+    Encodes optical frame text/Base64 into a grayscale QR code image array.
     """
 
     def __init__(
         self,
         error_correction: str = "M",
-        box_size: int = 10,
-        border: int = 4,
+        box_size: int = 4,
+        border: int = 2,
+        version: Optional[int] = None,
     ):
-        if qrcode is None:
-            raise ImportError("qrcode package is required: pip install qrcode[pil]")
-
         self.error_correction = _EC_MAP.get(error_correction.upper(), ERROR_CORRECT_M)
         self.box_size = box_size
         self.border = border
+        self.version = version
 
-    def encode(self, packet_bytes: bytes) -> np.ndarray:
-        """Encode binary data into a QR code image as a numpy array (grayscale)."""
-        import base64
-        # Convert binary packet bytes to Base64 ASCII string to avoid qrcode library glog(0) crashes
-        b64_str = base64.b64encode(packet_bytes).decode("ascii")
+    def encode(self, packet_bytes: Union[bytes, str]) -> np.ndarray:
+        """Encode optical packet data (Base64 string or bytes) into a QR code numpy array."""
+        if isinstance(packet_bytes, bytes):
+            try:
+                text_str = packet_bytes.decode("ascii")
+            except Exception:
+                import base64
+                text_str = base64.b64encode(packet_bytes).decode("ascii")
+        else:
+            text_str = str(packet_bytes)
+
         qr = qrcode.QRCode(
-            version=None,  # auto-select
+            version=self.version,
             error_correction=self.error_correction,
             box_size=self.box_size,
             border=self.border,
         )
-        qr.add_data(b64_str)
+        qr.add_data(text_str)
         qr.make(fit=True)
 
-        # Generate PIL image (mode='1' for black/white)
         pil_img = qr.make_image(fill_color="black", back_color="white")
-        pil_img = pil_img.convert("L")  # grayscale
+        pil_img = pil_img.convert("L")  # grayscale uint8
 
         return np.array(pil_img, dtype=np.uint8)
 
     def decode(self, frame: np.ndarray) -> Optional[bytes]:
-        """Decode a QR code from a camera frame.
+        """Decode a QR code from a camera frame, returning string bytes."""
+        raw_str = self._decode_pyzbar(frame)
+        if raw_str is None:
+            raw_str = self._decode_opencv(frame)
 
-        Tries pyzbar first, then falls back to OpenCV.
-        Returns None if no QR code is detected.
-        """
-        import base64
-        raw = self._decode_pyzbar(frame)
-        if raw is None:
-            raw = self._decode_opencv(frame)
-
-        if raw is None:
+        if raw_str is None:
             return None
 
-        # Attempt Base64 decode to restore original binary packet bytes
-        try:
-            return base64.b64decode(raw, validate=True)
-        except Exception:
-            return raw
+        if isinstance(raw_str, str):
+            return raw_str.encode("ascii")
+        return raw_str
 
-    def _decode_opencv(self, frame: np.ndarray) -> Optional[bytes]:
+    def _decode_opencv(self, frame: np.ndarray) -> Optional[str]:
         """Attempt QR decode using OpenCV's built-in detector."""
         try:
-            import cv2
             detector = cv2.QRCodeDetector()
-            # Try single decode first
-            data_str, points, _ = detector.detectAndDecode(frame)
-            if data_str:
-                return data_str.encode("latin-1")
+            
+            # Convert to grayscale if 3-channel BGR
+            if len(frame.shape) == 3:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = frame
 
-            # Fallback to multi decode
-            retval, decoded_info, points, straight_qrcode = detector.detectAndDecodeMulti(frame)
+            # Pass 1: Direct grayscale decode
+            data_str, _, _ = detector.detectAndDecode(gray)
+            if data_str:
+                return data_str
+
+            # Pass 2: Multi-detect
+            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(gray)
             if retval and decoded_info:
                 for info in decoded_info:
                     if info:
-                        return info.encode("latin-1") if isinstance(info, str) else info
+                        return info
+
+            # Pass 3: Bounding box crop around QR code
+            mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)[1]
+            coords = cv2.findNonZero(mask)
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                pad = 12
+                x0, y0 = max(0, x - pad), max(0, y - pad)
+                x1, y1 = min(gray.shape[1], x + w + pad), min(gray.shape[0], y + h + pad)
+                cropped = gray[y0:y1, x0:x1]
+                data_str, _, _ = detector.detectAndDecode(cropped)
+                if data_str:
+                    return data_str
         except Exception:
             pass
         return None
 
-    def _decode_pyzbar(self, frame: np.ndarray) -> Optional[bytes]:
-        """Attempt QR decode using pyzbar as fallback."""
+    def _decode_pyzbar(self, frame: np.ndarray) -> Optional[str]:
+        """Attempt QR decode using pyzbar."""
         try:
             from pyzbar.pyzbar import decode as pyzbar_decode
             results = pyzbar_decode(frame)
             if results:
-                return results[0].data
+                d = results[0].data
+                return d.decode("utf-8") if isinstance(d, bytes) else str(d)
         except Exception:
             pass
         return None
-
-
-def encode_packet_to_image(
-    packet: Packet,
-    transport: Optional[VisualTransport] = None,
-) -> np.ndarray:
-    """Convenience: serialize a Packet and encode it to a visual image."""
-    if transport is None:
-        transport = QRTransport()
-    packet_bytes = serialize_packet(packet)
-    return transport.encode(packet_bytes)

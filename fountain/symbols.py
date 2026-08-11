@@ -1,78 +1,102 @@
 """
-PhotonDrop — Fountain Symbols
+PhotonDrop — Fountain Symbols & Mathematics
 
-Dataclass and helpers for LT-coded encoded symbols.
-Symbol metadata is kept minimal because the receiver can
-deterministically regenerate block selections from the symbol_id.
+Implements Mulberry32 PRNG, degree sampler, seed-to-chunk index mapping,
+and XOR symbol generation matching lightspeed-share-main codec.ts.
 """
 
 from __future__ import annotations
 
-import hashlib
-import random
-from typing import List, Optional, Tuple
+from typing import List
 
 
-def derive_seed(session_id: bytes, symbol_id: int) -> int:
-    """Derive a deterministic 32-bit PRNG seed from session + symbol IDs.
+def mulberry32(seed: int):
+    """Deterministic PRNG matching lightspeed-share-main codec.ts mulberry32.
 
-    Both sender and receiver compute the same seed so the receiver
-    can regenerate the block selection without explicit transmission
-    of block indices.
+    Returns a zero-argument function that outputs a float in range [0, 1).
     """
-    raw = session_id + symbol_id.to_bytes(4, "big")
-    h = hashlib.sha256(raw).digest()
-    return int.from_bytes(h[:4], "big")
+    a = seed & 0xFFFFFFFF
+
+    def rand() -> float:
+        nonlocal a
+        a = (a + 0x6D2B79F5) & 0xFFFFFFFF
+        t = a
+        t = ((t ^ (t >> 15)) * (t | 1)) & 0xFFFFFFFF
+        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+
+    return rand
 
 
-def select_blocks(
-    seed: int, degree: int, K: int
-) -> List[int]:
-    """Deterministically select *degree* distinct source block indices.
+def pick_degree(rand_fn, chunks: int) -> int:
+    """Robust-soliton-ish degree distribution matching lightspeed-share-main."""
+    if chunks <= 1:
+        return 1
+    r = rand_fn()
+    if r < 0.06:
+        return 1
+    cumulative = 0.06
+    for d in range(2, min(chunks, 40) + 1):
+        cumulative += 0.94 / (d * (d - 1))
+        if r < cumulative:
+            return d
+    return 2
 
-    Uses a seeded PRNG so both sender and receiver arrive at the
-    same selection given the same (seed, degree, K).
+
+def chunk_indices_for_seed(seed: int, chunks: int) -> List[int]:
+    """Return list of chunk indices XOR-ed into symbol identified by `seed`.
+
+    Matches lightspeed-share-main chunkIndicesForSeed function:
+      - Systematic prefix when seed < chunks: returns [seed]
+      - Random selection via mulberry32 PRNG when seed >= chunks
     """
-    rng = random.Random(seed)
-    indices = rng.sample(range(K), min(degree, K))
-    indices.sort()
-    return indices
+    if seed < chunks:
+        return [seed]
+
+    rand_fn = mulberry32((seed + 0x9E3779B9) & 0xFFFFFFFF)
+    degree = pick_degree(rand_fn, chunks)
+    picked = {}
+    guard = 0
+    while len(picked) < degree and guard < degree * 32:
+        guard += 1
+        idx = int(rand_fn() * chunks) % chunks
+        picked[idx] = True
+
+    return list(picked.keys())
+
+
+def xor_bytes(target: bytearray, source: bytes) -> None:
+    """XOR source byte array into target bytearray in-place."""
+    for i in range(min(len(target), len(source))):
+        target[i] ^= source[i]
+
+
+def xor_blocks(blocks: List[bytes]) -> bytes:
+    """XOR a list of equal-length bytes objects together."""
+    if not blocks:
+        return b""
+    result = bytearray(blocks[0])
+    for b in blocks[1:]:
+        xor_bytes(result, b)
+    return bytes(result)
 
 
 def symbol_plan(
     session_id: bytes,
     symbol_id: int,
-    K: int,
-    sampler: Optional["DegreeSampler"] = None,
-) -> Tuple[int, List[int]]:
-    """Return the deterministic degree and source-block set for a symbol.
-
-    The first K symbols are systematic degree-1 symbols. That gives receivers
-    an immediate ripple on clean captures while preserving the fountain stream
-    for all later symbols.
-    """
-    if K < 1:
-        raise ValueError("K must be >= 1")
-    if symbol_id < K:
-        return 1, [symbol_id]
-
-    if sampler is None:
-        from fountain.degree_distribution import DegreeSampler
-
-        sampler = DegreeSampler(K)
-
-    seed = derive_seed(session_id, symbol_id)
-    rng = random.Random(seed)
-    degree = sampler.sample(rng)
-    return degree, select_blocks(seed, degree, K)
+    total_blocks: int,
+    sampler=None,
+) -> tuple[int, List[int]]:
+    """Legacy helper for backward compatibility: return (degree, block_indices)."""
+    indices = chunk_indices_for_seed(symbol_id, total_blocks)
+    return len(indices), indices
 
 
-def xor_blocks(blocks: List[bytes]) -> bytes:
-    """XOR a list of equal-length byte blocks together."""
-    if not blocks:
-        raise ValueError("Cannot XOR an empty list of blocks")
-    result = bytearray(blocks[0])
-    for blk in blocks[1:]:
-        for i in range(len(result)):
-            result[i] ^= blk[i]
-    return bytes(result)
+def derive_seed(session_id: bytes, symbol_id: int) -> int:
+    """Legacy helper: return symbol_id as uint32 seed."""
+    return symbol_id & 0xFFFFFFFF
+
+
+def select_blocks(seed: int, degree: int, total_blocks: int) -> List[int]:
+    """Legacy helper for backward compatibility."""
+    return chunk_indices_for_seed(seed, total_blocks)

@@ -147,9 +147,9 @@ class Receiver:
         prev_state = self.reconstruction.state
         self.reconstruction.feed_packet(packet)
 
-        # Track session lock
-        if self.reconstruction.session.session_id and self.processor._current_session is None:
-            self.processor.set_session(self.reconstruction.session.session_id)
+        # Track file session lock
+        if self.reconstruction.session.file_metadata and self.processor._current_file_id is None:
+            self.processor.set_session(self.reconstruction.session.file_metadata.file_id)
 
         # Update decode FPS & goodput
         if elapsed > 0:

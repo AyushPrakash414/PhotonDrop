@@ -91,12 +91,10 @@ def prepare_file(
     blocks = split_into_blocks(raw_data, block_size)
     total_source_blocks = len(blocks)
 
-    session_id = FileMetadata.generate_session_id()
     file_id = FileMetadata.generate_file_id()
 
     metadata = FileMetadata(
         file_id=file_id,
-        session_id=session_id,
         file_name=file_name,
         file_size=file_size,
         mime_type=mime_type,

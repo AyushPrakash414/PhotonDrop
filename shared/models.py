@@ -3,14 +3,25 @@ PhotonDrop — Data Models
 
 Dataclasses for file metadata, packet headers, encoded symbols,
 transfer statistics, and receiver session state.
+Matches lightspeed-share-main architecture with full test backward compatibility.
 """
 
 from __future__ import annotations
 
+import random
 import uuid
+import zlib
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
-from typing import List, Optional
+from typing import Any, List, Optional
+
+from shared.constants import (
+    FRAME_DATA,
+    FRAME_MANIFEST,
+    MAGIC_0,
+    MAGIC_1,
+    PROTOCOL_VERSION,
+)
 
 
 # ─── Receiver State Machine ───────────────────────────────────────
@@ -34,49 +45,148 @@ class ReceiverState(IntEnum):
 @dataclass
 class FileMetadata:
     """Metadata about the file being transferred."""
-    file_id: str                   # unique per-file identifier
-    session_id: bytes              # 128-bit session identifier (16 bytes)
-    file_name: str                 # sanitized original file name
+    file_id: Any                   # uint32 per-file numeric identifier or string
+    file_name: str                 # original file name
     file_size: int                 # total file size in bytes
     mime_type: str                 # detected MIME type
-    block_size: int                # size of each source block in bytes
-    total_source_blocks: int       # total number of source blocks (K)
-    sha256: str                    # hex-encoded SHA-256 of the original file
+    block_size: int                # size of each source block in bytes (chunkSize)
+    total_source_blocks: int       # total number of source blocks (chunks / K)
+    sha256: str                    # hex-encoded SHA-256 digest of original file
+    session_id_bytes: bytes = b""  # optional legacy session_id storage
+
+    def __init__(
+        self,
+        file_id: Any,
+        file_name: str,
+        file_size: int,
+        mime_type: str,
+        block_size: int,
+        total_source_blocks: int,
+        sha256: str,
+        session_id: bytes = b"",
+    ):
+        if isinstance(file_id, str):
+            try:
+                self.file_id = int(file_id, 16) & 0xFFFFFFFF
+            except Exception:
+                self.file_id = zlib.crc32(file_id.encode("utf-8")) & 0xFFFFFFFF
+        else:
+            self.file_id = int(file_id) & 0xFFFFFFFF
+
+        self.file_name = file_name
+        self.file_size = file_size
+        self.mime_type = mime_type
+        self.block_size = block_size
+        self.total_source_blocks = total_source_blocks
+        self.sha256 = sha256
+        self.session_id_bytes = session_id or self.file_id.to_bytes(4, byteorder="big").rjust(16, b"\x00")
+
+    @property
+    def session_id(self) -> bytes:
+        """Returns session ID bytes for backward compatibility."""
+        return self.session_id_bytes or self.file_id.to_bytes(4, byteorder="big").rjust(16, b"\x00")
+
+    @property
+    def file_id_str(self) -> str:
+        """Returns hex-encoded file ID string."""
+        return f"{self.file_id:08x}"
 
     @staticmethod
     def generate_session_id() -> bytes:
-        """Generate a cryptographically random 128-bit session ID."""
+        """Generate a random 128-bit session ID for backward compatibility."""
         return uuid.uuid4().bytes
 
     @staticmethod
-    def generate_file_id() -> str:
-        """Generate a unique file identifier."""
-        return uuid.uuid4().hex[:16]
+    def generate_file_id() -> int:
+        """Generate a random 32-bit uint32 file ID."""
+        return random.randint(1, 0xFFFFFFFF)
 
 
 # ─── Packet Header ────────────────────────────────────────────────
 
 @dataclass
 class PacketHeader:
-    """Wire-protocol header for every PhotonDrop packet."""
-    magic: bytes                   # 5 bytes: b"PDROP"
-    version: int                   # protocol version (uint8)
-    packet_type: int               # one of PACKET_TYPE_* (uint8)
-    session_id: bytes              # 16 bytes
-    file_id: str                   # 16-char hex string
-    symbol_id: int                 # encoded symbol identifier (uint32)
-    source_block_count: int        # K — total number of source blocks (uint16)
-    payload_length: int            # length of the payload section (uint16)
+    """Wire-protocol 24-byte header matching lightspeed-share-main."""
+    magic_0: int = MAGIC_0         # 0x50 ('P')
+    magic_1: int = MAGIC_1         # 0x44 ('D')
+    version: int = PROTOCOL_VERSION # 1
+    packet_type: int = FRAME_DATA  # 0 = MANIFEST, 1 = DATA
+    file_id: int = 0               # uint32
+    chunks: int = 0                # K — total source blocks (uint32)
+    chunk_size: int = 0            # block size in bytes (uint32)
+    size: int = 0                  # total file size in bytes (uint32)
+    seed: int = 0                  # symbol identifier (uint32)
+
+    def __init__(
+        self,
+        magic_0: int = MAGIC_0,
+        magic_1: int = MAGIC_1,
+        version: int = PROTOCOL_VERSION,
+        packet_type: int = FRAME_DATA,
+        file_id: Any = 0,
+        chunks: int = 0,
+        chunk_size: int = 0,
+        size: int = 0,
+        seed: int = 0,
+        # Backward compatibility kwargs
+        magic: bytes = b"",
+        session_id: bytes = b"",
+        symbol_id: int = 0,
+        source_block_count: int = 0,
+        payload_length: int = 0,
+    ):
+        if magic:
+            self.magic_0 = magic[0] if len(magic) > 0 else MAGIC_0
+            self.magic_1 = magic[1] if len(magic) > 1 else MAGIC_1
+        else:
+            self.magic_0 = magic_0
+            self.magic_1 = magic_1
+
+        self.version = version
+        self.packet_type = packet_type
+
+        if isinstance(file_id, str):
+            try:
+                self.file_id = int(file_id, 16) & 0xFFFFFFFF
+            except Exception:
+                self.file_id = zlib.crc32(file_id.encode("utf-8")) & 0xFFFFFFFF
+        else:
+            self.file_id = int(file_id) & 0xFFFFFFFF
+
+        self.chunks = chunks or source_block_count
+        self.chunk_size = chunk_size or payload_length
+        self.size = size
+        self.seed = seed or symbol_id
+
+    @property
+    def magic(self) -> bytes:
+        return bytes([self.magic_0, self.magic_1])
+
+    @property
+    def session_id(self) -> bytes:
+        return self.file_id.to_bytes(4, byteorder="big").rjust(16, b"\x00")
+
+    @property
+    def symbol_id(self) -> int:
+        return self.seed
+
+    @property
+    def source_block_count(self) -> int:
+        return self.chunks
+
+    @property
+    def payload_length(self) -> int:
+        return self.chunk_size
 
 
 # ─── Packet ────────────────────────────────────────────────────────
 
 @dataclass
 class Packet:
-    """A complete PhotonDrop wire packet: header + payload + checksum."""
+    """A complete PhotonDrop visual frame packet: 24B header + payload."""
     header: PacketHeader
     payload: bytes                 # raw payload bytes
-    checksum: int                  # CRC32 checksum (uint32)
+    checksum: int = 0              # legacy checksum field
 
     def human_readable(self) -> str:
         """Return a debug-friendly string representation."""
@@ -84,10 +194,9 @@ class Packet:
         ptype = PACKET_TYPE_NAMES.get(self.header.packet_type, f"0x{self.header.packet_type:02x}")
         return (
             f"Packet(type={ptype}, "
-            f"session={self.header.session_id.hex()[:8]}…, "
-            f"symbol={self.header.symbol_id}, "
-            f"payload={self.header.payload_length}B, "
-            f"crc=0x{self.checksum:08x})"
+            f"file_id=0x{self.header.file_id:08x}, "
+            f"seed={self.header.seed}, "
+            f"payload={len(self.payload)}B)"
         )
 
 
@@ -96,7 +205,7 @@ class Packet:
 @dataclass
 class EncodedSymbol:
     """An LT fountain-coded encoded symbol."""
-    symbol_id: int                 # unique symbol identifier
+    symbol_id: int                 # unique symbol identifier (seed)
     degree: int                    # number of source blocks XOR'd
     block_indices: List[int]       # which source blocks were combined
     data: bytes                    # XOR'd payload

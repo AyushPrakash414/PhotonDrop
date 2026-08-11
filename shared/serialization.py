@@ -1,153 +1,220 @@
 """
-PhotonDrop — Binary Serialization
+PhotonDrop — Binary & Base64 Serialization
 
-Packs and unpacks PhotonDrop wire-protocol packets using Python's
-struct module for compact binary encoding.
+Packs and unpacks PhotonDrop wire-protocol frames matching lightspeed-share-main.
 
-Wire format (all multi-byte fields are big-endian):
+Wire format (24 bytes fixed header, big-endian):
 
     Offset  Size   Field
-    ──────  ─────  ──────────────────────
-     0       5     MAGIC  ("PDROP")
-     5       1     VERSION (uint8)
-     6       1     PACKET_TYPE (uint8)
-     7      16     SESSION_ID (16 bytes)
-    23      16     FILE_ID (16 ASCII chars)
-    39       4     SYMBOL_ID (uint32)
-    43       2     SOURCE_BLOCK_COUNT (uint16)
-    45       2     PAYLOAD_LENGTH (uint16)
-    47       N     PAYLOAD (N = PAYLOAD_LENGTH)
-    47+N     4     CHECKSUM (CRC32 uint32)
-    ──────  ─────  ──────────────────────
-    Total:  51 + N bytes
+    ──────  ─────  ───────────────────────────────
+     0       1     MAGIC_0 (0x50 'P')
+     1       1     MAGIC_1 (0x44 'D')
+     2       1     VERSION (1)
+     3       1     TYPE (0 = MANIFEST, 1 = DATA)
+     4       4     FILE_ID (uint32)
+     8       4     CHUNKS / K (uint32)
+    12       4     CHUNK_SIZE (uint32)
+    16       4     SIZE / Total bytes (uint32)
+    20       4     SEED / Symbol ID (uint32)
+    24       N     PAYLOAD (JSON for MANIFEST, bytes for DATA)
+    ──────  ─────  ───────────────────────────────
+    Total:  24 + N bytes
 
-The CHECKSUM covers bytes [0 … 47+N-1]  (everything before the checksum).
+Frames are Base64 encoded for optical QR transport.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import struct
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from shared.checksum import compute_crc32, verify_crc32
 from shared.constants import (
-    MAGIC,
-    MAX_PACKET_SIZE,
-    MAX_PAYLOAD_SIZE,
+    FRAME_DATA,
+    FRAME_MANIFEST,
+    HEADER_BYTES,
+    MAGIC_0,
+    MAGIC_1,
     PROTOCOL_VERSION,
 )
-from shared.models import Packet, PacketHeader
+from shared.models import FileMetadata, Packet, PacketHeader
+
+_HEADER_FMT = "!BBBBIIIII"
 
 
-# ─── Header struct format (big-endian) ────────────────────────────
-# 5s  = MAGIC
-# B   = VERSION
-# B   = PACKET_TYPE
-# 16s = SESSION_ID
-# 16s = FILE_ID (ASCII)
-# I   = SYMBOL_ID      (uint32)
-# H   = SOURCE_BLOCK_COUNT (uint16)
-# H   = PAYLOAD_LENGTH     (uint16)
-_HEADER_FMT = "!5sBB16s16sIHH"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)   # 47 bytes
+def build_manifest_frame(file_id: int, manifest: Dict[str, Any]) -> str:
+    """Build a Base64-encoded Manifest optical frame."""
+    json_bytes = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+    header_bytes = struct.pack(
+        _HEADER_FMT,
+        MAGIC_0,
+        MAGIC_1,
+        PROTOCOL_VERSION,
+        FRAME_MANIFEST,
+        file_id & 0xFFFFFFFF,
+        manifest.get("chunks", 0),
+        manifest.get("chunkSize", 0),
+        manifest.get("size", 0),
+        0,
+    )
+    frame_bytes = header_bytes + json_bytes
+    return base64.b64encode(frame_bytes).decode("ascii")
 
-_CHECKSUM_FMT = "!I"
-_CHECKSUM_SIZE = struct.calcsize(_CHECKSUM_FMT)  # 4 bytes
+
+def build_data_frame(
+    file_id: int,
+    chunks: int,
+    chunk_size: int,
+    size: int,
+    seed: int,
+    payload: bytes,
+) -> str:
+    """Build a Base64-encoded Data optical frame."""
+    header_bytes = struct.pack(
+        _HEADER_FMT,
+        MAGIC_0,
+        MAGIC_1,
+        PROTOCOL_VERSION,
+        FRAME_DATA,
+        file_id & 0xFFFFFFFF,
+        chunks,
+        chunk_size,
+        size,
+        seed & 0xFFFFFFFF,
+    )
+    frame_bytes = header_bytes + payload
+    return base64.b64encode(frame_bytes).decode("ascii")
+
+
+def parse_frame(text: str) -> Optional[Dict[str, Any]]:
+    """Parse a Base64 text string into a frame object matching lightspeed-share-main parseFrame."""
+    if not text:
+        return None
+    try:
+        raw_bytes = base64.b64decode(text.strip())
+    except Exception:
+        return None
+
+    if len(raw_bytes) < HEADER_BYTES:
+        return None
+
+    m0, m1, ver, ftype, file_id, chunks, chunk_size, size, seed = struct.unpack_from(_HEADER_FMT, raw_bytes, 0)
+    if m0 != MAGIC_0 or m1 != MAGIC_1 or ver != PROTOCOL_VERSION:
+        return None
+
+    payload = raw_bytes[HEADER_BYTES:]
+
+    if ftype == FRAME_MANIFEST:
+        try:
+            manifest_dict = json.loads(payload.decode("utf-8"))
+            return {
+                "type": "manifest",
+                "file_id": file_id,
+                "manifest": manifest_dict,
+            }
+        except Exception:
+            return None
+
+    if ftype == FRAME_DATA:
+        if chunks == 0 or len(payload) != chunk_size:
+            return None
+        return {
+            "type": "data",
+            "file_id": file_id,
+            "chunks": chunks,
+            "chunk_size": chunk_size,
+            "size": size,
+            "seed": seed,
+            "payload": payload,
+        }
+
+    return None
 
 
 def serialize_packet(packet: Packet) -> bytes:
-    """Serialize a Packet into a compact binary byte string.
-
-    The checksum is computed over the header + payload and appended at
-    the end.  Any checksum value stored in ``packet.checksum`` is
-    replaced with the freshly computed one.
-    """
-    file_id_bytes = packet.header.file_id.encode("ascii").ljust(16, b"\x00")[:16]
-
+    """Serialize Packet to raw binary 24B header + payload."""
     header_bytes = struct.pack(
         _HEADER_FMT,
-        packet.header.magic,
+        packet.header.magic_0,
+        packet.header.magic_1,
         packet.header.version,
         packet.header.packet_type,
-        packet.header.session_id,
-        file_id_bytes,
-        packet.header.symbol_id,
-        packet.header.source_block_count,
-        packet.header.payload_length,
+        packet.header.file_id & 0xFFFFFFFF,
+        packet.header.chunks,
+        packet.header.chunk_size,
+        packet.header.size,
+        packet.header.seed & 0xFFFFFFFF,
     )
-
-    body = header_bytes + packet.payload
-    crc = compute_crc32(body)
-    return body + struct.pack(_CHECKSUM_FMT, crc)
+    return header_bytes + packet.payload
 
 
-def deserialize_packet(data: bytes) -> Optional[Packet]:
-    """Deserialize binary data into a Packet.
+def deserialize_packet(data: bytes | str) -> Optional[Packet]:
+    """Deserialize raw binary data or Base64 string into Packet."""
+    text = None
+    if isinstance(data, str):
+        text = data
+    elif isinstance(data, bytes):
+        try:
+            text = data.decode("ascii").strip()
+        except Exception:
+            text = None
 
-    Returns ``None`` if the data is too short, the magic is wrong,
-    the version is unsupported, or the checksum fails.
-    """
-    if len(data) < _HEADER_SIZE + _CHECKSUM_SIZE:
+    if text and text.startswith(("UEQ", "PD")):
+        parsed = parse_frame(text)
+        if parsed is not None:
+            if parsed["type"] == "manifest":
+                m = parsed["manifest"]
+                header = PacketHeader(
+                    magic_0=MAGIC_0,
+                    magic_1=MAGIC_1,
+                    version=PROTOCOL_VERSION,
+                    packet_type=FRAME_MANIFEST,
+                    file_id=parsed["file_id"],
+                    chunks=m.get("chunks", 0),
+                    chunk_size=m.get("chunkSize", 0),
+                    size=m.get("size", 0),
+                    seed=0,
+                )
+                payload_bytes = json.dumps(m, separators=(",", ":")).encode("utf-8")
+                return Packet(header=header, payload=payload_bytes)
+            elif parsed["type"] == "data":
+                header = PacketHeader(
+                    magic_0=MAGIC_0,
+                    magic_1=MAGIC_1,
+                    version=PROTOCOL_VERSION,
+                    packet_type=FRAME_DATA,
+                    file_id=parsed["file_id"],
+                    chunks=parsed["chunks"],
+                    chunk_size=parsed["chunk_size"],
+                    size=parsed["size"],
+                    seed=parsed["seed"],
+                )
+                return Packet(header=header, payload=parsed["payload"])
+
+    if not isinstance(data, bytes) or len(data) < HEADER_BYTES:
         return None
 
-    # Unpack header
-    (
-        magic,
-        version,
-        packet_type,
-        session_id,
-        file_id_raw,
-        symbol_id,
-        source_block_count,
-        payload_length,
-    ) = struct.unpack_from(_HEADER_FMT, data, 0)
-
-    # Validate magic
-    if magic != MAGIC:
+    m0, m1, ver, ftype, file_id, chunks, chunk_size, size, seed = struct.unpack_from(_HEADER_FMT, data, 0)
+    if m0 != MAGIC_0 or m1 != MAGIC_1 or ver != PROTOCOL_VERSION:
         return None
 
-    # Validate version
-    if version != PROTOCOL_VERSION:
+    if ftype not in (FRAME_MANIFEST, FRAME_DATA):
         return None
 
-    # Validate payload length
-    expected_total = _HEADER_SIZE + payload_length + _CHECKSUM_SIZE
-    if len(data) < expected_total:
+    payload = data[HEADER_BYTES:]
+    if ftype == FRAME_DATA and len(payload) != chunk_size:
         return None
-    if payload_length > MAX_PAYLOAD_SIZE:
-        return None
-
-    # Extract payload
-    payload = data[_HEADER_SIZE : _HEADER_SIZE + payload_length]
-
-    # Extract and verify checksum
-    crc_offset = _HEADER_SIZE + payload_length
-    (checksum,) = struct.unpack_from(_CHECKSUM_FMT, data, crc_offset)
-    body = data[:crc_offset]
-    if not verify_crc32(body, checksum):
-        return None
-
-    file_id = file_id_raw.rstrip(b"\x00").decode("ascii", errors="replace")
 
     header = PacketHeader(
-        magic=magic,
-        version=version,
-        packet_type=packet_type,
-        session_id=session_id,
+        magic_0=m0,
+        magic_1=m1,
+        version=ver,
+        packet_type=ftype,
         file_id=file_id,
-        symbol_id=symbol_id,
-        source_block_count=source_block_count,
-        payload_length=payload_length,
+        chunks=chunks,
+        chunk_size=chunk_size,
+        size=size,
+        seed=seed,
     )
-
-    return Packet(header=header, payload=payload, checksum=checksum)
-
-
-def get_header_size() -> int:
-    """Return the fixed header size in bytes."""
-    return _HEADER_SIZE
-
-
-def get_overhead() -> int:
-    """Return total per-packet overhead (header + checksum) in bytes."""
-    return _HEADER_SIZE + _CHECKSUM_SIZE
+    return Packet(header=header, payload=payload)

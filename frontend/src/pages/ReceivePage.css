@@ -12,18 +12,28 @@
   padding: 16px 24px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
+  gap: 16px;
+}
+
+.receive-status-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.control-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .receive-layout {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  gap: 32px;
-}
-
-@media (max-width: 1024px) {
-  .receive-layout {
-    grid-template-columns: 1fr;
-  }
+  gap: 24px;
 }
 
 .receive-col-left {
@@ -54,19 +64,75 @@
   gap: 14px;
 }
 
-@media (max-width: 640px) {
-  .metrics-grid-3 {
-    grid-template-columns: 1fr 1fr;
+.verification-badge-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.verification-badge-card.verified {
+  border-color: var(--success);
+  background-color: rgba(53, 166, 111, 0.1);
+  color: var(--success);
+}
+
+.verification-badge-card.mismatch {
+  border-color: var(--error);
+  background-color: rgba(235, 87, 87, 0.1);
+  color: var(--error);
+}
+
+@media (max-width: 1024px) {
+  .receive-layout {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 768px) {
   .receive-header-row {
     flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    padding: 16px;
+    align-items: stretch;
+    padding: 14px 16px;
+    gap: 12px;
+  }
+
+  .receive-status-box {
+    justify-content: center;
     text-align: center;
+    font-size: 0.8rem;
+  }
+
+  .control-btn-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .control-btn-group .btn {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 0.8rem;
+    justify-content: center;
+  }
+
+  .metrics-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
+@media (max-width: 480px) {
+  .control-btn-group {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}

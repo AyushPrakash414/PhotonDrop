@@ -53,15 +53,25 @@ button:disabled {
   opacity: 0.5;
 }
 
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
 .btn-primary {
   background-color: var(--accent-primary);
   color: #FFFFFF;
-  font-weight: 600;
-  border-radius: var(--radius-pill);
-  padding: 12px 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   box-shadow: 0 4px 14px rgba(242, 106, 69, 0.25);
 }
 
@@ -74,16 +84,32 @@ button:disabled {
 .btn-secondary {
   background-color: var(--bg-muted);
   color: var(--text-primary);
-  font-weight: 600;
-  border-radius: var(--radius-pill);
-  padding: 12px 24px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  border: 1px solid var(--border-color);
 }
 
 .btn-secondary:hover:not(:disabled) {
   background-color: var(--border-color);
+}
+
+.btn-danger {
+  background-color: var(--error);
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(235, 87, 87, 0.25);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #d94343;
+}
+
+.btn-success {
+  background-color: var(--success);
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(53, 166, 111, 0.25);
+}
+
+.btn-large {
+  padding: 14px 28px;
+  font-size: 1rem;
 }
 
 .card {
@@ -100,6 +126,29 @@ button:disabled {
   padding: 32px;
 }
 
+@media (max-width: 768px) {
+  .card {
+    padding: 16px;
+  }
+  .card-large {
+    padding: 20px;
+  }
+}
+
 .font-mono {
   font-family: var(--font-mono);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot.active {
+  background-color: var(--success);
+  box-shadow: 0 0 10px var(--success);
 }

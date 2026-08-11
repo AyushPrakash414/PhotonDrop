@@ -1,1 +1,0 @@
-# PhotonDrop — Shared Protocol Layer

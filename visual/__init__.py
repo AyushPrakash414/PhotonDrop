@@ -1,1 +1,0 @@
-# PhotonDrop — Visual Transport Layer

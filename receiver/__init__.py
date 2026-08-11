@@ -1,1 +1,0 @@
-# PhotonDrop — Receiver Application

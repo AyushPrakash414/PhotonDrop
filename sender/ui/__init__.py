@@ -1,1 +1,0 @@
-# PhotonDrop — Sender UI

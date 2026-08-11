@@ -1,1 +1,0 @@
-# PhotonDrop — Fountain Coding Layer

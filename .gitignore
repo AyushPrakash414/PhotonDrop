@@ -1,40 +1,19 @@
-# Node / Frontend
+# Dependencies
 node_modules/
-frontend/node_modules/
-.vercel/
-frontend/dist/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
+# Production build outputs
 dist/
-build/
-*.egg
-.eggs/
+.output/
+.nitro/
+.cache/
 
-# Virtual environments
-venv/
-.venv/
-env/
-.env/
+# Environment variables
+.env
+.env.local
 
-# IDE
+# IDE & OS
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# PhotonDrop
-debug/
-received_files/
 *.log
-lightspeed-share-main/

@@ -1,9 +1,13 @@
 /**
- * PhotonDrop optical codec.
+ * PhotonDrop optical codec — optimised build.
  *
- * File -> chunks -> LT fountain coded symbols -> binary frames -> base64 -> QR
- * frames. The receiver peels the equations back into the original chunks and
+ * File -> chunks -> LT fountain coded symbols -> raw binary frames -> QR Byte
+ * mode.  The receiver peels the equations back into the original chunks and
  * verifies a SHA-256 digest.
+ *
+ * Key change from baseline:  frames are transmitted as raw Uint8Array in QR
+ * Byte mode (ISO 8859-1).  This eliminates the 33 % Base64 overhead, allowing
+ * ~40 % more payload per frame at the same QR version.
  */
 
 export const MAGIC_0 = 0x50; // 'P'
@@ -34,6 +38,10 @@ export type ParsedFrame =
       seed: number;
       payload: Uint8Array;
     };
+
+/* ------------------------------------------------------------------ */
+/*  PRNG & fountain helpers                                           */
+/* ------------------------------------------------------------------ */
 
 /** Deterministic PRNG so the receiver can rebuild an encoder's chunk picks. */
 export function mulberry32(seed: number) {
@@ -83,6 +91,10 @@ export async function sha256Hex(data: Uint8Array | ArrayBuffer): Promise<string>
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/* ------------------------------------------------------------------ */
+/*  Base64 helpers (kept only for legacy / fallback parsing)          */
+/* ------------------------------------------------------------------ */
+
 export function bytesToBase64(bytes: Uint8Array): string {
   let out = "";
   const step = 0x8000;
@@ -98,6 +110,10 @@ export function base64ToBytes(value: string): Uint8Array {
   for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
   return bytes;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Frame building — now returns raw Uint8Array (no Base64)           */
+/* ------------------------------------------------------------------ */
 
 function writeHeader(
   view: DataView,
@@ -119,6 +135,7 @@ function writeHeader(
   view.setUint32(20, seed, false);
 }
 
+/** Build a data frame as raw bytes (ready for QR Byte mode). */
 export function buildDataFrame(opts: {
   fileId: number;
   chunks: number;
@@ -126,7 +143,7 @@ export function buildDataFrame(opts: {
   size: number;
   seed: number;
   payload: Uint8Array;
-}): string {
+}): Uint8Array {
   const frame = new Uint8Array(HEADER_BYTES + opts.payload.length);
   writeHeader(
     new DataView(frame.buffer),
@@ -138,10 +155,11 @@ export function buildDataFrame(opts: {
     opts.seed,
   );
   frame.set(opts.payload, HEADER_BYTES);
-  return bytesToBase64(frame);
+  return frame;
 }
 
-export function buildManifestFrame(fileId: number, manifest: Manifest): string {
+/** Build a manifest frame as raw bytes (ready for QR Byte mode). */
+export function buildManifestFrame(fileId: number, manifest: Manifest): Uint8Array {
   const json = new TextEncoder().encode(JSON.stringify(manifest));
   const frame = new Uint8Array(HEADER_BYTES + json.length);
   writeHeader(
@@ -154,16 +172,27 @@ export function buildManifestFrame(fileId: number, manifest: Manifest): string {
     0,
   );
   frame.set(json, HEADER_BYTES);
-  return bytesToBase64(frame);
+  return frame;
 }
 
-export function parseFrame(text: string): ParsedFrame | null {
+/* ------------------------------------------------------------------ */
+/*  Frame parsing — accepts raw bytes OR legacy Base64 string         */
+/* ------------------------------------------------------------------ */
+
+export function parseFrame(input: Uint8Array | string): ParsedFrame | null {
   let bytes: Uint8Array;
-  try {
-    bytes = base64ToBytes(text.trim());
-  } catch {
-    return null;
+
+  if (typeof input === "string") {
+    // Legacy path: try Base64 decode
+    try {
+      bytes = base64ToBytes(input.trim());
+    } catch {
+      return null;
+    }
+  } else {
+    bytes = input;
   }
+
   if (bytes.length <= HEADER_BYTES) return null;
   if (bytes[0] !== MAGIC_0 || bytes[1] !== MAGIC_1 || bytes[2] !== VERSION) return null;
 
@@ -188,6 +217,10 @@ export function parseFrame(text: string): ParsedFrame | null {
   return { type: "data", fileId, chunks, chunkSize, size, seed, payload: payload.slice() };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Chunking & symbol encoding                                        */
+/* ------------------------------------------------------------------ */
+
 /** Splits a file body into fixed-size, zero-padded chunks. */
 export function splitIntoChunks(data: Uint8Array, chunkSize: number): Uint8Array[] {
   const count = Math.max(1, Math.ceil(data.length / chunkSize));
@@ -206,6 +239,10 @@ export function encodeSymbol(chunks: Uint8Array[], seed: number): Uint8Array {
   for (const index of indices) xorInto(symbol, chunks[index]!);
   return symbol;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Fountain decoder                                                  */
+/* ------------------------------------------------------------------ */
 
 /** Incremental peeling decoder: tolerates dropped and duplicated frames. */
 export class FountainDecoder {

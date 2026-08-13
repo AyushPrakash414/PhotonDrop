@@ -29,10 +29,10 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  chunkSize: 320,
-  fps: 8,
-  redundancy: 1.7,
-  errorCorrection: "M",
+  chunkSize: 500,
+  fps: 25,
+  redundancy: 1.25,
+  errorCorrection: "L",
 };
 
 type Live = {

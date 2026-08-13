@@ -36,6 +36,9 @@ export const Route = createFileRoute("/send")({
 
 type Prepared = { manifest: Manifest; chunks: Uint8Array[]; fileId: number };
 
+/** Number of leading frames that carry the manifest (then pure data). */
+const MANIFEST_BURST = 5;
+
 function SendPage() {
   const { settings, setLive, logActivity } = usePhoton();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -78,7 +81,15 @@ function SendPage() {
     [settings.chunkSize],
   );
 
-  // Frame pump: paints one optical frame per tick at the configured FPS.
+  /*
+   * Frame pump — renders one optical frame per tick at the configured FPS.
+   *
+   * Optimisations vs. the baseline implementation:
+   * 1. Frames are raw Uint8Array passed via QR Byte-mode segments — no Base64.
+   * 2. Manifest is only sent for the first MANIFEST_BURST frames instead of
+   *    every 14th frame, freeing ~7 % bandwidth.
+   * 3. FPS default raised from 8 → 25 (configurable via settings).
+   */
   useEffect(() => {
     if (!transmitting || !prepared) return;
     let cancelled = false;
@@ -92,8 +103,10 @@ function SendPage() {
         if (cancelled || !active || !canvas) return;
 
         const index = framesRef.current;
-        const text =
-          index % 14 === 0
+
+        // First MANIFEST_BURST frames are manifest, then pure data.
+        const frameBytes: Uint8Array =
+          index < MANIFEST_BURST
             ? buildManifestFrame(active.fileId, active.manifest)
             : buildDataFrame({
                 fileId: active.fileId,
@@ -105,12 +118,17 @@ function SendPage() {
               });
 
         try {
-          await QR.toCanvas(canvas, text, {
-            errorCorrectionLevel: settings.errorCorrection,
-            margin: 2,
-            width: 520,
-            color: { dark: "#000000ff", light: "#ffffffff" },
-          });
+          // Use QR Byte-mode segment: raw binary, no Base64 overhead.
+          await QR.toCanvas(
+            canvas,
+            [{ data: frameBytes, mode: "byte" }],
+            {
+              errorCorrectionLevel: settings.errorCorrection,
+              margin: 2,
+              width: 520,
+              color: { dark: "#000000ff", light: "#ffffffff" },
+            },
+          );
         } catch {
           /* frame too large for this QR config; skip it */
         }

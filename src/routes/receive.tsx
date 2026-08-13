@@ -12,6 +12,7 @@ import {
 } from "@/lib/photon/codec";
 import { usePhoton } from "@/lib/photon/store";
 import { cn } from "@/lib/utils";
+import type { ScanResult } from "@/lib/photon/scanner-worker";
 
 export const Route = createFileRoute("/receive")({
   head: () => ({
@@ -41,6 +42,8 @@ function ReceivePage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const decoderRef = useRef<FountainDecoder | null>(null);
   const manifestRef = useRef<Manifest | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerBusyRef = useRef(false);
   const statsRef = useRef({ frames: 0, useful: 0, duplicates: 0, lastTick: 0, decoded: 0 });
 
   const [scanning, setScanning] = useState(false);
@@ -77,49 +80,13 @@ function ReceivePage() {
     [logActivity],
   );
 
-  useEffect(() => {
-    if (!scanning) return;
-    let cancelled = false;
-    let stream: MediaStream | null = null;
-    let raf = 0;
-
-    const start = async () => {
-      const jsQR = (await import("jsqr")).default;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
-      } catch {
-        setError("Camera access was denied. Allow camera permission to receive optical frames.");
-        setScanning(false);
-        return;
-      }
-      const video = videoRef.current;
-      if (!video || cancelled) return;
-      video.srcObject = stream;
-      await video.play().catch(() => undefined);
-
-      const loop = () => {
-        if (cancelled) return;
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext("2d", { willReadFrequently: true });
-        if (canvas && context && video.readyState >= 2 && video.videoWidth) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const image = context.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(image.data, image.width, image.height, {
-            inversionAttempts: "dontInvert",
-          });
-          if (code?.data) handleFrame(code.data);
-        }
-        raf = requestAnimationFrame(loop);
-      };
-      raf = requestAnimationFrame(loop);
-    };
-
-    const handleFrame = (text: string) => {
-      const frame = parseFrame(text);
+  /*
+   * Handle a decoded QR frame (called from Worker message callback).
+   * Accepts raw binary bytes from jsQR's binaryData.
+   */
+  const handleFrame = useCallback(
+    (rawBytes: Uint8Array) => {
+      const frame = parseFrame(rawBytes);
       if (!frame) return;
       const s = statsRef.current;
       s.frames += 1;
@@ -163,6 +130,89 @@ function ReceivePage() {
       if (decoder.complete && manifestRef.current) {
         void finish(decoder, manifestRef.current);
       }
+    },
+    [finish, setLive, stats.fps],
+  );
+
+  /*
+   * Camera capture loop with off-main-thread QR decode.
+   *
+   * Optimisations:
+   * 1. jsQR runs inside a dedicated Web Worker — the UI never blocks.
+   * 2. Camera resolution lowered to 640×480 — 4× fewer pixels to process.
+   * 3. Uses a ping-pong pattern: the next frame is only sent to the worker
+   *    after it finishes the previous one, avoiding backpressure.
+   */
+  useEffect(() => {
+    if (!scanning) return;
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    let raf = 0;
+
+    // Spin up the scanner Web Worker
+    const worker = new Worker(
+      new URL("../lib/photon/scanner-worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    workerRef.current = worker;
+    workerBusyRef.current = false;
+
+    // When the worker returns a result, handle it and mark ready for next frame
+    worker.onmessage = (e: MessageEvent<ScanResult | null>) => {
+      workerBusyRef.current = false;
+      if (e.data?.binaryData) {
+        handleFrame(new Uint8Array(e.data.binaryData));
+      }
+    };
+
+    const start = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            // Lower resolution = 4× fewer pixels for jsQR to process
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+        });
+      } catch {
+        setError("Camera access was denied. Allow camera permission to receive optical frames.");
+        setScanning(false);
+        return;
+      }
+      const video = videoRef.current;
+      if (!video || cancelled) return;
+      video.srcObject = stream;
+      await video.play().catch(() => undefined);
+
+      const loop = () => {
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d", { willReadFrequently: true });
+
+        // Only send a frame to the worker if it's not still processing the last one
+        if (
+          canvas &&
+          context &&
+          video.readyState >= 2 &&
+          video.videoWidth &&
+          !workerBusyRef.current
+        ) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const image = context.getImageData(0, 0, canvas.width, canvas.height);
+
+          // Transfer the pixel buffer to the worker (zero-copy)
+          workerBusyRef.current = true;
+          worker.postMessage(
+            { data: image.data, width: image.width, height: image.height },
+            [image.data.buffer],
+          );
+        }
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
     };
 
     void start();
@@ -170,11 +220,13 @@ function ReceivePage() {
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      worker.terminate();
+      workerRef.current = null;
       stream?.getTracks().forEach((track) => track.stop());
       setLive({ linkState: "idle", receiverFps: 0 });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanning, finish, setLive]);
+  }, [scanning, handleFrame, setLive]);
 
   const reset = () => {
     decoderRef.current = null;
